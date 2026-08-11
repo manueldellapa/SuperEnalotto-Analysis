@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Static analysis / linting
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+
+# IDE / editors
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Project-generated data
+data/raw/
+data/processed/
+
+# Temporary files
+*.tmp
