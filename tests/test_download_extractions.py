@@ -8,6 +8,7 @@ import logging
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Self
 
 import pytest
 import requests
@@ -15,6 +16,28 @@ import requests
 from scripts import download_extractions
 from superenalotto.models import Extraction
 from superenalotto.scraper import ScrapingError
+
+
+def freeze_today(
+    monkeypatch: pytest.MonkeyPatch,
+    today_value: date,
+) -> None:
+    """Pin the current date seen by the download script."""
+
+    class FrozenDate(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(
+                today_value.year,
+                today_value.month,
+                today_value.day,
+            )
+
+    monkeypatch.setattr(
+        download_extractions,
+        "date",
+        FrozenDate,
+    )
 
 
 def make_extraction(
@@ -594,6 +617,105 @@ def test_validate_interval_rejects_future_end_year() -> None:
         )
 
 
+def test_validate_interval_accepts_current_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
+    download_extractions.validate_interval(
+        2026,
+        1,
+        2026,
+        6,
+    )
+
+
+def test_validate_interval_accepts_december_of_past_year(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
+    download_extractions.validate_interval(
+        2025,
+        1,
+        2025,
+        12,
+    )
+
+
+def test_validate_interval_rejects_future_end_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="end year/month must not be in the future",
+    ):
+        download_extractions.validate_interval(
+            2026,
+            1,
+            2026,
+            7,
+        )
+
+
+def test_validate_interval_rejects_future_start_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="start year/month must not be in the future",
+    ):
+        download_extractions.validate_interval(
+            2026,
+            7,
+            2026,
+            9,
+        )
+
+
+def test_validate_interval_rejects_future_month_in_december(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 12, 15),
+    )
+
+    download_extractions.validate_interval(
+        2026,
+        1,
+        2026,
+        12,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="end year must be between",
+    ):
+        download_extractions.validate_interval(
+            2026,
+            1,
+            2027,
+            1,
+        )
+
+
 def test_resolve_interval_single_month() -> None:
     args = argparse.Namespace(
         start_year=2026,
@@ -610,7 +732,37 @@ def test_resolve_interval_single_month() -> None:
     )
 
 
-def test_resolve_interval_defaults_end_month_to_december() -> None:
+def test_resolve_interval_defaults_end_month_to_december_for_past_year(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
+    args = argparse.Namespace(
+        start_year=2024,
+        start_month=7,
+        end_year=2025,
+        end_month=None,
+    )
+
+    assert download_extractions.resolve_interval(args) == (
+        2024,
+        7,
+        2025,
+        12,
+    )
+
+
+def test_resolve_interval_defaults_end_month_to_current_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
     args = argparse.Namespace(
         start_year=2024,
         start_month=7,
@@ -622,7 +774,30 @@ def test_resolve_interval_defaults_end_month_to_december() -> None:
         2024,
         7,
         2026,
-        12,
+        6,
+    )
+
+
+def test_resolve_interval_explicit_end_month_wins_for_current_year(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_today(
+        monkeypatch,
+        date(2026, 6, 15),
+    )
+
+    args = argparse.Namespace(
+        start_year=2026,
+        start_month=1,
+        end_year=2026,
+        end_month=3,
+    )
+
+    assert download_extractions.resolve_interval(args) == (
+        2026,
+        1,
+        2026,
+        3,
     )
 
 
