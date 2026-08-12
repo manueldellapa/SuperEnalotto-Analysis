@@ -32,6 +32,10 @@ from superenalotto.scraper import (
 LOGGER = logging.getLogger(__name__)
 
 
+class ExtractionConflictError(ValueError):
+    """Raised when two records share an identity but carry different payloads."""
+
+
 def configure_logging(verbose: bool = False) -> None:
     """Configure application logging."""
     logging.basicConfig(
@@ -194,10 +198,27 @@ def process_month(
     return extractions
 
 
+def describe_extraction_payload(
+    extraction: Extraction,
+) -> str:
+    """Return a readable summary of the drawn values of an extraction."""
+    numbers = ", ".join(str(number) for number in extraction.numbers)
+
+    return (
+        f"numbers=[{numbers}] jolly={extraction.jolly} superstar={extraction.superstar}"
+    )
+
+
 def deduplicate_extractions(
     extractions: Iterable[Extraction],
 ) -> list[Extraction]:
-    """Remove duplicated extractions and sort chronologically."""
+    """Remove duplicated extractions and sort chronologically.
+
+    Exact duplicates are collapsed. Records sharing a contest number and an
+    extraction date but carrying different drawn values are a data-integrity
+    error and raise ExtractionConflictError instead of silently overwriting
+    each other.
+    """
     unique: dict[
         tuple[int, date],
         Extraction,
@@ -222,6 +243,16 @@ def deduplicate_extractions(
             extraction.contest_number,
             extraction.extraction_date,
         )
+
+        previous_extraction = unique.get(key)
+
+        if previous_extraction is not None and previous_extraction != extraction:
+            raise ExtractionConflictError(
+                f"Contest {extraction.contest_number} on "
+                f"{extraction.extraction_date.isoformat()} has conflicting "
+                f"payloads: {describe_extraction_payload(previous_extraction)} "
+                f"vs {describe_extraction_payload(extraction)}"
+            )
 
         unique[key] = extraction
 
@@ -566,6 +597,9 @@ def main() -> int:
         end_month,
     ) = resolve_interval(args)
 
+    canonical_path = PROCESSED_DATA_DIRECTORY / EXTRACTIONS_FILE_NAME
+    partial_path = PROCESSED_DATA_DIRECTORY / PARTIAL_EXTRACTIONS_FILE_NAME
+
     try:
         extractions, failures = download_interval(
             start_year,
@@ -574,6 +608,18 @@ def main() -> int:
             end_month,
             force=args.force,
         )
+    except ExtractionConflictError as exc:
+        LOGGER.error(
+            "Data integrity error: %s",
+            exc,
+        )
+
+        LOGGER.error(
+            "No CSV written; %s left untouched",
+            canonical_path,
+        )
+
+        return 1
     except ValueError as exc:
         LOGGER.error(
             "%s",
@@ -585,9 +631,6 @@ def main() -> int:
         LOGGER.exception("Unexpected error while downloading extractions")
 
         return 1
-
-    canonical_path = PROCESSED_DATA_DIRECTORY / EXTRACTIONS_FILE_NAME
-    partial_path = PROCESSED_DATA_DIRECTORY / PARTIAL_EXTRACTIONS_FILE_NAME
 
     if failures:
         save_extractions_csv(
