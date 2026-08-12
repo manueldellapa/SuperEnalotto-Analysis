@@ -961,7 +961,7 @@ def test_main_returns_one_on_invalid_interval(
     assert exit_code == 1
 
 
-def test_main_warns_when_overwriting_more_complete_csv(
+def test_main_preserves_canonical_csv_on_partial_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -1017,4 +1017,80 @@ def test_main_warns_when_overwriting_more_complete_csv(
         exit_code = download_extractions.main()
 
     assert exit_code == 1
-    assert "fewer rows" in caplog.text
+
+    assert (
+        existing_csv.read_text(
+            encoding="utf-8",
+        )
+        == "contest_number\n1\n2\n3\n"
+    )
+
+    partial_csv = tmp_path / "extractions.partial.csv"
+
+    assert partial_csv.exists()
+
+    with partial_csv.open(
+        encoding="utf-8",
+        newline="",
+    ) as csv_file:
+        rows = list(csv.DictReader(csv_file))
+
+    assert len(rows) == 1
+    assert rows[0]["contest_number"] == "105"
+
+    assert "Preserved" in caplog.text
+
+
+def test_main_writes_partial_csv_when_canonical_is_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        download_extractions,
+        "PROCESSED_DATA_DIRECTORY",
+        tmp_path,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "download_extractions.py",
+            "--start-year",
+            "2026",
+            "--start-month",
+            "7",
+            "--end-month",
+            "7",
+        ],
+    )
+
+    extraction = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    def fake_download_interval(
+        start_year: int,
+        start_month: int,
+        end_year: int,
+        end_month: int,
+        *,
+        force: bool = False,
+    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
+        return [extraction], [(2026, 7, "boom")]
+
+    monkeypatch.setattr(
+        download_extractions,
+        "download_interval",
+        fake_download_interval,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = download_extractions.main()
+
+    assert exit_code == 1
+    assert not (tmp_path / "extractions.csv").exists()
+    assert (tmp_path / "extractions.partial.csv").exists()
+    assert "unwritten" in caplog.text

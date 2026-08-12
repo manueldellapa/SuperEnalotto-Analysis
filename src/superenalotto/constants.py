@@ -99,3 +99,6 @@ VALID_NUMBER_RANGE: Final[range] = range(
 RAW_FILE_NAME_TEMPLATE: Final[str] = "{year}-{month:02d}.html"
 
 EXTRACTIONS_FILE_NAME: Final[str] = "extractions.csv"
+
+# Written instead of the canonical dataset when a run had failed months.
+PARTIAL_EXTRACTIONS_FILE_NAME: Final[str] = "extractions.partial.csv"

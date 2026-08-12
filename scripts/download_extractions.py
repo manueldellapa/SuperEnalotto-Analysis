@@ -16,6 +16,7 @@ from superenalotto.constants import (
     EXTRACTIONS_FILE_NAME,
     MIN_ARCHIVE_YEAR,
     MONTH_NUMBER_TO_NAME,
+    PARTIAL_EXTRACTIONS_FILE_NAME,
     PROCESSED_DATA_DIRECTORY,
     RAW_DATA_DIRECTORY,
     RAW_FILE_NAME_TEMPLATE,
@@ -524,20 +525,34 @@ def main() -> int:
 
         return 1
 
-    previous_row_count = count_csv_rows(
-        PROCESSED_DATA_DIRECTORY / EXTRACTIONS_FILE_NAME,
-    )
-
-    save_extractions_csv(extractions)
+    canonical_path = PROCESSED_DATA_DIRECTORY / EXTRACTIONS_FILE_NAME
 
     if failures:
-        if previous_row_count is not None and previous_row_count > len(extractions):
+        partial_path = save_extractions_csv(
+            extractions,
+            output_path=PROCESSED_DATA_DIRECTORY / PARTIAL_EXTRACTIONS_FILE_NAME,
+        )
+
+        existing_row_count = count_csv_rows(canonical_path)
+
+        if existing_row_count is None:
             LOGGER.warning(
-                "New CSV has fewer rows than the file it replaced: %d -> %d "
-                "(%d failed month(s))",
-                previous_row_count,
-                len(extractions),
+                "Left %s unwritten because %d month(s) failed; "
+                "partial results (%d row(s)) saved to %s",
+                canonical_path,
                 len(failures),
+                len(extractions),
+                partial_path,
+            )
+        else:
+            LOGGER.warning(
+                "Preserved %s (%d row(s)) because %d month(s) failed; "
+                "partial results (%d row(s)) saved to %s",
+                canonical_path,
+                existing_row_count,
+                len(failures),
+                len(extractions),
+                partial_path,
             )
 
         LOGGER.error(
@@ -554,6 +569,11 @@ def main() -> int:
             )
 
         return 1
+
+    save_extractions_csv(
+        extractions,
+        output_path=canonical_path,
+    )
 
     LOGGER.info(
         "Completed successfully: %d extraction(s)",
