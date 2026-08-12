@@ -315,7 +315,10 @@ def validate_interval(
     if end_month not in MONTH_NUMBER_TO_NAME:
         raise ValueError(f"end month must be between 1 and 12, got {end_month}")
 
-    current_year = date.today().year
+    today = date.today()
+
+    current_year = today.year
+    current_month = today.month
 
     if not MIN_ARCHIVE_YEAR <= start_year <= current_year:
         raise ValueError(
@@ -327,6 +330,32 @@ def validate_interval(
         raise ValueError(
             f"end year must be between {MIN_ARCHIVE_YEAR} and {current_year}, "
             f"got {end_year}"
+        )
+
+    if (
+        start_year,
+        start_month,
+    ) > (
+        current_year,
+        current_month,
+    ):
+        raise ValueError(
+            f"start year/month must not be in the future, got "
+            f"{start_year:04d}-{start_month:02d} (current: "
+            f"{current_year:04d}-{current_month:02d})"
+        )
+
+    if (
+        end_year,
+        end_month,
+    ) > (
+        current_year,
+        current_month,
+    ):
+        raise ValueError(
+            f"end year/month must not be in the future, got "
+            f"{end_year:04d}-{end_month:02d} (current: "
+            f"{current_year:04d}-{current_month:02d})"
         )
 
     if (
@@ -434,7 +463,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help=(
             "Last month to download. "
             "Defaults to --start-month when "
-            "--end-year is omitted, otherwise 12."
+            "--end-year is omitted, to the current month when "
+            "--end-year is the current year, otherwise 12."
         ),
     )
 
@@ -462,10 +492,14 @@ def resolve_interval(
 
     end_year: int = args.end_year if args.end_year is not None else start_year
 
+    today = date.today()
+
     if args.end_month is not None:
         end_month = args.end_month
     elif args.end_year is None:
         end_month = start_month
+    elif end_year == today.year:
+        end_month = today.month
     else:
         end_month = 12
 
