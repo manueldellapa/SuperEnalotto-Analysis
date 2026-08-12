@@ -523,6 +523,33 @@ def count_csv_rows(path: Path) -> int | None:
         return sum(1 for _ in csv.reader(csv_file)) - 1
 
 
+def remove_partial_extractions_csv(path: Path) -> bool:
+    """Delete a partial CSV left behind by an earlier failed run.
+
+    Cleanup never fails the run: an unremovable file is only reported.
+    """
+    if not path.exists():
+        return False
+
+    try:
+        path.unlink()
+    except OSError as exc:
+        LOGGER.warning(
+            "Could not remove stale partial CSV %s: %s",
+            path,
+            exc,
+        )
+
+        return False
+
+    LOGGER.info(
+        "Removed stale partial CSV: %s",
+        path,
+    )
+
+    return True
+
+
 def main() -> int:
     """Run the command-line downloader."""
     parser = build_argument_parser()
@@ -560,11 +587,12 @@ def main() -> int:
         return 1
 
     canonical_path = PROCESSED_DATA_DIRECTORY / EXTRACTIONS_FILE_NAME
+    partial_path = PROCESSED_DATA_DIRECTORY / PARTIAL_EXTRACTIONS_FILE_NAME
 
     if failures:
-        partial_path = save_extractions_csv(
+        save_extractions_csv(
             extractions,
-            output_path=PROCESSED_DATA_DIRECTORY / PARTIAL_EXTRACTIONS_FILE_NAME,
+            output_path=partial_path,
         )
 
         existing_row_count = count_csv_rows(canonical_path)
@@ -608,6 +636,8 @@ def main() -> int:
         extractions,
         output_path=canonical_path,
     )
+
+    remove_partial_extractions_csv(partial_path)
 
     LOGGER.info(
         "Completed successfully: %d extraction(s)",
