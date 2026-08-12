@@ -1269,3 +1269,161 @@ def test_main_writes_partial_csv_when_canonical_is_absent(
     assert not (tmp_path / "extractions.csv").exists()
     assert (tmp_path / "extractions.partial.csv").exists()
     assert "unwritten" in caplog.text
+
+
+def test_remove_partial_extractions_csv_deletes_existing_file(
+    tmp_path: Path,
+) -> None:
+    partial_csv = tmp_path / "extractions.partial.csv"
+    partial_csv.write_text(
+        "contest_number\n1\n",
+        encoding="utf-8",
+    )
+
+    assert download_extractions.remove_partial_extractions_csv(partial_csv) is True
+    assert not partial_csv.exists()
+
+
+def test_remove_partial_extractions_csv_ignores_missing_file(
+    tmp_path: Path,
+) -> None:
+    partial_csv = tmp_path / "extractions.partial.csv"
+
+    assert download_extractions.remove_partial_extractions_csv(partial_csv) is False
+
+
+def test_remove_partial_extractions_csv_warns_on_failed_removal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    partial_csv = tmp_path / "extractions.partial.csv"
+    partial_csv.write_text(
+        "contest_number\n1\n",
+        encoding="utf-8",
+    )
+
+    def broken_unlink(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated permission failure")
+
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        broken_unlink,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        removed = download_extractions.remove_partial_extractions_csv(partial_csv)
+
+    assert removed is False
+    assert partial_csv.exists()
+    assert "Could not remove stale partial CSV" in caplog.text
+
+
+def test_main_removes_stale_partial_csv_on_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        download_extractions,
+        "PROCESSED_DATA_DIRECTORY",
+        tmp_path,
+    )
+
+    stale_partial = tmp_path / "extractions.partial.csv"
+    stale_partial.write_text(
+        "contest_number\n999\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "download_extractions.py",
+            "--start-year",
+            "2026",
+            "--start-month",
+            "7",
+            "--end-month",
+            "7",
+        ],
+    )
+
+    extraction = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    def fake_download_interval(
+        start_year: int,
+        start_month: int,
+        end_year: int,
+        end_month: int,
+        *,
+        force: bool = False,
+    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
+        return [extraction], []
+
+    monkeypatch.setattr(
+        download_extractions,
+        "download_interval",
+        fake_download_interval,
+    )
+
+    exit_code = download_extractions.main()
+
+    assert exit_code == 0
+    assert (tmp_path / "extractions.csv").exists()
+    assert not stale_partial.exists()
+
+
+def test_main_keeps_partial_csv_when_run_has_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        download_extractions,
+        "PROCESSED_DATA_DIRECTORY",
+        tmp_path,
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "download_extractions.py",
+            "--start-year",
+            "2026",
+            "--start-month",
+            "7",
+            "--end-month",
+            "7",
+        ],
+    )
+
+    extraction = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    def fake_download_interval(
+        start_year: int,
+        start_month: int,
+        end_year: int,
+        end_month: int,
+        *,
+        force: bool = False,
+    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
+        return [extraction], [(2026, 7, "boom")]
+
+    monkeypatch.setattr(
+        download_extractions,
+        "download_interval",
+        fake_download_interval,
+    )
+
+    exit_code = download_extractions.main()
+
+    assert exit_code == 1
+    assert (tmp_path / "extractions.partial.csv").exists()
