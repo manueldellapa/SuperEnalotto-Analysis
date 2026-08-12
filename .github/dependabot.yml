@@ -1,0 +1,10 @@
+version: 2
+
+updates:
+  # The CI workflow pins both actions to a commit SHA, and astral-sh/setup-uv
+  # publishes no moving major tag, so without this the pins age indefinitely.
+  # Dependabot rewrites the SHA and the version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
