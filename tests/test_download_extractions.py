@@ -43,14 +43,18 @@ def freeze_today(
 def make_extraction(
     contest_number: int,
     extraction_date: date,
+    *,
+    numbers: tuple[int, int, int, int, int, int] = (4, 17, 19, 23, 47, 59),
+    jolly: int = 51,
+    superstar: int = 82,
 ) -> Extraction:
     """Create a valid extraction for tests."""
     return Extraction(
         contest_number=contest_number,
         extraction_date=extraction_date,
-        numbers=(4, 17, 19, 23, 47, 59),
-        jolly=51,
-        superstar=82,
+        numbers=numbers,
+        jolly=jolly,
+        superstar=superstar,
     )
 
 
@@ -416,6 +420,120 @@ def test_deduplicate_extractions_warns_on_conflicting_dates(
         )
 
     assert "conflicting dates" in caplog.text
+
+
+def test_deduplicate_extractions_collapses_equal_duplicates() -> None:
+    first = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    identical = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    assert first is not identical
+
+    result = download_extractions.deduplicate_extractions(
+        [
+            first,
+            identical,
+        ]
+    )
+
+    assert result == [first]
+
+
+def test_deduplicate_extractions_raises_on_conflicting_numbers() -> None:
+    first = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    conflicting = make_extraction(
+        105,
+        date(2026, 7, 2),
+        numbers=(1, 2, 3, 4, 5, 6),
+    )
+
+    with pytest.raises(
+        download_extractions.ExtractionConflictError,
+        match="conflicting payloads",
+    ) as exc_info:
+        download_extractions.deduplicate_extractions(
+            [
+                first,
+                conflicting,
+            ]
+        )
+
+    message = str(exc_info.value)
+
+    assert "Contest 105 on 2026-07-02" in message
+    assert "numbers=[4, 17, 19, 23, 47, 59]" in message
+    assert "numbers=[1, 2, 3, 4, 5, 6]" in message
+
+
+@pytest.mark.parametrize(
+    "conflicting",
+    [
+        make_extraction(
+            105,
+            date(2026, 7, 2),
+            numbers=(1, 2, 3, 4, 5, 6),
+        ),
+        make_extraction(
+            105,
+            date(2026, 7, 2),
+            jolly=7,
+        ),
+        make_extraction(
+            105,
+            date(2026, 7, 2),
+            superstar=9,
+        ),
+    ],
+)
+def test_deduplicate_extractions_raises_on_any_conflicting_field(
+    conflicting: Extraction,
+) -> None:
+    first = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    with pytest.raises(download_extractions.ExtractionConflictError):
+        download_extractions.deduplicate_extractions(
+            [
+                first,
+                conflicting,
+            ]
+        )
+
+
+def test_deduplicate_extractions_allows_same_payload_on_different_contests() -> None:
+    first = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    second = make_extraction(
+        106,
+        date(2026, 7, 4),
+    )
+
+    result = download_extractions.deduplicate_extractions(
+        [
+            first,
+            second,
+        ]
+    )
+
+    assert result == [
+        first,
+        second,
+    ]
 
 
 def test_save_extractions_csv(
@@ -868,6 +986,50 @@ def test_download_interval_collects_extractions(
     assert failures == []
 
 
+def test_download_interval_raises_on_conflicting_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    january = make_extraction(
+        1,
+        date(2024, 1, 2),
+    )
+
+    conflicting_january = make_extraction(
+        1,
+        date(2024, 1, 2),
+        jolly=7,
+    )
+
+    def fake_process_month(
+        year: int,
+        month: int,
+        *,
+        session: requests.Session,
+        force: bool = False,
+    ) -> list[Extraction]:
+        if month == 1:
+            return [january]
+
+        return [conflicting_january]
+
+    monkeypatch.setattr(
+        download_extractions,
+        "process_month",
+        fake_process_month,
+    )
+
+    with pytest.raises(
+        download_extractions.ExtractionConflictError,
+        match="conflicting payloads",
+    ):
+        download_extractions.download_interval(
+            2024,
+            1,
+            2024,
+            2,
+        )
+
+
 def test_download_interval_continues_after_failed_month(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1134,6 +1296,66 @@ def test_main_returns_one_on_invalid_interval(
     exit_code = download_extractions.main()
 
     assert exit_code == 1
+
+
+def test_main_preserves_canonical_csv_on_conflicting_payloads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        download_extractions,
+        "PROCESSED_DATA_DIRECTORY",
+        tmp_path,
+    )
+
+    canonical_csv = tmp_path / "extractions.csv"
+    canonical_csv.write_text(
+        "contest_number\n1\n2\n3\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "download_extractions.py",
+            "--start-year",
+            "2026",
+            "--start-month",
+            "7",
+            "--end-month",
+            "7",
+        ],
+    )
+
+    def fake_download_interval(
+        start_year: int,
+        start_month: int,
+        end_year: int,
+        end_month: int,
+        *,
+        force: bool = False,
+    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
+        raise download_extractions.ExtractionConflictError(
+            "Contest 105 on 2026-07-02 has conflicting payloads"
+        )
+
+    monkeypatch.setattr(
+        download_extractions,
+        "download_interval",
+        fake_download_interval,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        exit_code = download_extractions.main()
+
+    assert exit_code == 1
+    assert "Data integrity error" in caplog.text
+    assert "conflicting payloads" in caplog.text
+
+    assert canonical_csv.read_text(encoding="utf-8") == "contest_number\n1\n2\n3\n"
+    assert not (tmp_path / "extractions.partial.csv").exists()
 
 
 def test_main_preserves_canonical_csv_on_partial_failure(

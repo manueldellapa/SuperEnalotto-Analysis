@@ -13,7 +13,7 @@ historical SuperEnalotto extraction data from the official archive.
 - Cache raw HTML pages locally
 - Parse extraction results
 - Validate extracted data
-- Deduplicate extraction records
+- Deduplicate extraction records and reject conflicting duplicates
 - Export consolidated results to CSV
 - Retry failed HTTP requests with configurable backoff
 - Unit tests with pytest
