@@ -32,5 +32,8 @@ dist/
 data/raw/
 data/processed/
 
+# Knowledge graph (derivable: graphify extract . --code-only)
+graphify-out/
+
 # Temporary files
 *.tmp
