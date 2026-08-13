@@ -198,17 +198,6 @@ def process_month(
     return extractions
 
 
-def describe_extraction_payload(
-    extraction: Extraction,
-) -> str:
-    """Return a readable summary of the drawn values of an extraction."""
-    numbers = ", ".join(str(number) for number in extraction.numbers)
-
-    return (
-        f"numbers=[{numbers}] jolly={extraction.jolly} superstar={extraction.superstar}"
-    )
-
-
 def deduplicate_extractions(
     extractions: Iterable[Extraction],
 ) -> list[Extraction]:
@@ -250,8 +239,8 @@ def deduplicate_extractions(
             raise ExtractionConflictError(
                 f"Contest {extraction.contest_number} on "
                 f"{extraction.extraction_date.isoformat()} has conflicting "
-                f"payloads: {describe_extraction_payload(previous_extraction)} "
-                f"vs {describe_extraction_payload(extraction)}"
+                f"payloads: {previous_extraction.describe_payload()} "
+                f"vs {extraction.describe_payload()}"
             )
 
         unique[key] = extraction

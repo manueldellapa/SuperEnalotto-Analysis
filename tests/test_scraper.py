@@ -371,3 +371,104 @@ def test_parse_archive_page_removes_duplicate_extractions() -> None:
 
     assert len(extractions) == 1
     assert extractions[0].contest_number == 105
+
+
+def test_parse_archive_page_rejects_conflicting_duplicate_rows() -> None:
+    html = """
+    <table>
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>51</td>
+            <td>82</td>
+            <td>Dettagli</td>
+        </tr>
+
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>1 2 3 4 5 6</td>
+            <td>51</td>
+            <td>82</td>
+            <td>Dettagli</td>
+        </tr>
+    </table>
+    """
+
+    with pytest.raises(
+        ScrapingError,
+        match="conflicting payloads",
+    ) as exc_info:
+        parse_archive_page(html)
+
+    message = str(exc_info.value)
+
+    assert "Contest 105 on 2026-07-02" in message
+    assert "numbers=[4, 17, 19, 23, 47, 59]" in message
+    assert "numbers=[1, 2, 3, 4, 5, 6]" in message
+
+
+@pytest.mark.parametrize(
+    ("jolly", "superstar"),
+    [
+        ("7", "82"),
+        ("51", "9"),
+    ],
+)
+def test_parse_archive_page_rejects_conflicting_jolly_or_superstar(
+    jolly: str,
+    superstar: str,
+) -> None:
+    html = f"""
+    <table>
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>51</td>
+            <td>82</td>
+            <td>Dettagli</td>
+        </tr>
+
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>{jolly}</td>
+            <td>{superstar}</td>
+            <td>Dettagli</td>
+        </tr>
+    </table>
+    """
+
+    with pytest.raises(
+        ScrapingError,
+        match="conflicting payloads",
+    ):
+        parse_archive_page(html)
+
+
+def test_parse_archive_page_keeps_same_payload_on_different_contests() -> None:
+    html = """
+    <table>
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>51</td>
+            <td>82</td>
+            <td>Dettagli</td>
+        </tr>
+
+        <tr>
+            <td>Concorso Nº 106 del 4 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>51</td>
+            <td>82</td>
+            <td>Dettagli</td>
+        </tr>
+    </table>
+    """
+
+    extractions = parse_archive_page(html)
+
+    assert [extraction.contest_number for extraction in extractions] == [
+        105,
+        106,
+    ]

@@ -54,6 +54,40 @@ def test_extraction_csv_fieldnames_match_as_dict_keys() -> None:
     assert set(Extraction.CSV_FIELDNAMES) == set(extraction.as_dict().keys())
 
 
+def test_extraction_describe_payload() -> None:
+    extraction = Extraction(
+        contest_number=105,
+        extraction_date=date(2026, 7, 2),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=51,
+        superstar=82,
+    )
+
+    assert extraction.describe_payload() == (
+        "numbers=[4, 17, 19, 23, 47, 59] jolly=51 superstar=82"
+    )
+
+
+def test_extraction_describe_payload_omits_identity() -> None:
+    first = Extraction(
+        contest_number=105,
+        extraction_date=date(2026, 7, 2),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=51,
+        superstar=82,
+    )
+
+    second = Extraction(
+        contest_number=999,
+        extraction_date=date(2026, 8, 13),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=51,
+        superstar=82,
+    )
+
+    assert first.describe_payload() == second.describe_payload()
+
+
 def test_extraction_is_hashable() -> None:
     extraction = Extraction(
         contest_number=105,

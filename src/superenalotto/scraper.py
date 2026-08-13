@@ -238,7 +238,13 @@ def _parse_table_row(row: Tag) -> Extraction | None:
 
 
 def parse_archive_page(html: str) -> list[Extraction]:
-    """Parse all SuperEnalotto extractions from a monthly archive page."""
+    """Parse all SuperEnalotto extractions from a monthly archive page.
+
+    Rows repeating an already-parsed contest number and date are skipped when
+    they carry identical results. Rows repeating that identity with different
+    results are a data-integrity error and raise ScrapingError, so the page is
+    never silently reduced to whichever payload appeared first.
+    """
     soup = BeautifulSoup(
         html,
         "html.parser",
@@ -255,7 +261,11 @@ def parse_archive_page(html: str) -> list[Extraction]:
         rows = soup.find_all("tr")
 
     extractions: list[Extraction] = []
-    seen: set[tuple[int, date]] = set()
+
+    seen: dict[
+        tuple[int, date],
+        Extraction,
+    ] = {}
 
     for row in rows:
         if not isinstance(row, Tag):
@@ -271,10 +281,20 @@ def parse_archive_page(html: str) -> list[Extraction]:
             extraction.extraction_date,
         )
 
-        if identity in seen:
+        previous_extraction = seen.get(identity)
+
+        if previous_extraction is not None:
+            if previous_extraction != extraction:
+                raise ScrapingError(
+                    f"Contest {extraction.contest_number} on "
+                    f"{extraction.extraction_date.isoformat()} has conflicting "
+                    f"payloads: {previous_extraction.describe_payload()} "
+                    f"vs {extraction.describe_payload()}"
+                )
+
             continue
 
-        seen.add(identity)
+        seen[identity] = extraction
         extractions.append(extraction)
 
     if not extractions:
