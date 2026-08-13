@@ -375,6 +375,161 @@ def test_process_month_rejects_extractions_outside_requested_month(
             session=session,
         )
 
+    assert not (tmp_path / "2026-07.html").exists()
+
+
+def test_process_month_redownloads_after_cached_archive_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = DataPaths.from_root(tmp_path)
+
+    extraction = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    cached_file = paths.raw_html_path(
+        2026,
+        7,
+    )
+
+    paths.raw_directory.mkdir(
+        parents=True,
+    )
+
+    cached_file.write_text(
+        "<html>temporary error page</html>",
+        encoding="utf-8",
+    )
+
+    download_count = 0
+
+    def fake_download_archive_page(
+        year: int,
+        month: int,
+        *,
+        session: requests.Session | None = None,
+    ) -> str:
+        nonlocal download_count
+
+        download_count += 1
+
+        return "<html>fresh archive</html>"
+
+    def fake_parse_archive_page(
+        html: str,
+    ) -> list[Extraction]:
+        if html == "<html>temporary error page</html>":
+            raise ScrapingError("not an archive page")
+
+        assert html == "<html>fresh archive</html>"
+
+        return [extraction]
+
+    monkeypatch.setattr(
+        pipeline,
+        "download_archive_page",
+        fake_download_archive_page,
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "parse_archive_page",
+        fake_parse_archive_page,
+    )
+
+    with requests.Session() as session:
+        with pytest.raises(
+            ScrapingError,
+            match="not an archive page",
+        ):
+            pipeline.process_month(
+                2026,
+                7,
+                paths=paths,
+                session=session,
+            )
+
+        assert download_count == 0
+        assert not cached_file.exists()
+
+        result = pipeline.process_month(
+            2026,
+            7,
+            paths=paths,
+            session=session,
+        )
+
+    assert result == [extraction]
+    assert download_count == 1
+
+    assert (
+        cached_file.read_text(
+            encoding="utf-8",
+        )
+        == "<html>fresh archive</html>"
+    )
+
+
+def test_process_month_preserves_error_when_invalid_cache_cannot_be_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    paths = DataPaths.from_root(tmp_path)
+
+    cached_file = paths.raw_html_path(
+        2026,
+        7,
+    )
+
+    paths.raw_directory.mkdir(
+        parents=True,
+    )
+
+    cached_file.write_text(
+        "<html>temporary error page</html>",
+        encoding="utf-8",
+    )
+
+    def fake_parse_archive_page(
+        html: str,
+    ) -> list[Extraction]:
+        raise ScrapingError("not an archive page")
+
+    def broken_unlink(*args: object, **kwargs: object) -> None:
+        raise OSError("simulated permission error")
+
+    monkeypatch.setattr(
+        pipeline,
+        "parse_archive_page",
+        fake_parse_archive_page,
+    )
+
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        broken_unlink,
+    )
+
+    with (
+        caplog.at_level(logging.WARNING),
+        requests.Session() as session,
+        pytest.raises(
+            ScrapingError,
+            match="not an archive page",
+        ),
+    ):
+        pipeline.process_month(
+            2026,
+            7,
+            paths=paths,
+            session=session,
+        )
+
+    assert "Could not remove invalid cached archive" in caplog.text
+
 
 CONFLICTING_ROWS_HTML = """
 <table>
@@ -838,6 +993,41 @@ def test_validate_interval_accepts_valid_interval() -> None:
         2026,
         7,
     )
+
+
+def test_validate_interval_accepts_first_online_archive_year() -> None:
+    pipeline.validate_interval(
+        2009,
+        1,
+        2009,
+        1,
+    )
+
+
+def test_validate_interval_rejects_year_before_online_archive() -> None:
+    with pytest.raises(
+        ValueError,
+        match="start year must be between 2009",
+    ):
+        pipeline.validate_interval(
+            2008,
+            12,
+            2009,
+            1,
+        )
+
+
+def test_validate_interval_rejects_end_year_before_online_archive() -> None:
+    with pytest.raises(
+        ValueError,
+        match="end year must be between 2009",
+    ):
+        pipeline.validate_interval(
+            2009,
+            1,
+            2008,
+            12,
+        )
 
 
 def test_validate_interval_rejects_implausible_start_year() -> None:
