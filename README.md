@@ -23,9 +23,51 @@ historical SuperEnalotto extraction data from the official archive.
 ## Requirements
 
 - Python 3.14.x
-- `uv` or `pip`
+- `uv` — required to install from `uv.lock`; `pip` can install the project but
+  only from the version ranges, not the lockfile
 
 The supported Python version is defined in `pyproject.toml`:
 
 ```text
 >=3.14,<3.15
+```
+
+`.python-version` pins the exact interpreter (3.14.4) that `uv venv` resolves.
+
+## Setup
+
+A fresh checkout has no virtual environment. Create one, then install from the
+lockfile:
+
+```bash
+uv venv
+uv sync --locked --all-extras
+source .venv/bin/activate
+```
+
+`uv.lock` pins every dependency, transitives included, with hashes.
+`uv sync --locked` installs exactly those versions and fails if the lockfile
+has drifted from `pyproject.toml`, so a local environment matches CI.
+
+> [!IMPORTANT]
+> `uv pip install -e ".[dev]"` does **not** read `uv.lock`. It is the
+> pip-compatible interface and resolves from the ranges in `pyproject.toml`,
+> which is how two machines end up on different versions. Use `uv sync`.
+
+### Updating dependencies
+
+After changing a dependency in `pyproject.toml`, refresh the lockfile and
+commit it in the same change — CI rejects a stale lockfile:
+
+```bash
+uv lock
+```
+
+To move dependencies to newer versions within the ranges already declared:
+
+```bash
+uv lock --upgrade
+```
+
+Dependabot also opens a monthly pull request against `uv.lock`, so the pins do
+not age unattended. See `.github/dependabot.yml`.

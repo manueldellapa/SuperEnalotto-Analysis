@@ -8,3 +8,13 @@ updates:
     directory: /
     schedule:
       interval: monthly
+
+  # uv.lock pins every dependency, transitives included, so nothing moves on
+  # its own any more — the ranges in pyproject.toml stopped being what CI
+  # installs. This is what keeps the pins from ageing: Dependabot proposes the
+  # bumps, CI proves them, and the alternative is remembering to run
+  # `uv lock --upgrade` by hand.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
