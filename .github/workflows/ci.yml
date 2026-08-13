@@ -51,9 +51,8 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           # The action's default cache-dependency-glob already covers
-          # **/pyproject.toml — this repo's only dependency declaration — and
-          # **/uv.lock, so the key invalidates when dependencies change and a
-          # lockfile added later needs no change here.
+          # **/uv.lock and **/pyproject.toml, so the key tracks the lockfile
+          # without any configuration here.
           enable-cache: true
           # Create and activate .venv via `uv venv`, which resolves the
           # interpreter from .python-version (3.14.4, inside the
@@ -62,11 +61,15 @@ jobs:
           # they would not. Load-bearing: dropping it breaks the install step.
           activate-environment: true
 
-      # Mirrors the setup documented in CLAUDE.md. This step is also the guard
-      # that CI really is on Python 3.14.x: any other interpreter fails the
-      # requires-python check right here.
+      # Installs the exact versions in uv.lock, transitives included, against
+      # the venv the previous step activated. Two guards ride on this one step:
+      # --locked fails the run if uv.lock has drifted from pyproject.toml, so a
+      # dependency edit cannot land without its lockfile update, and the
+      # requires-python check fails here on any interpreter that is not
+      # 3.14.x. Not `uv pip install`: that is the pip-compatible interface and
+      # ignores uv.lock, which would leave the repo locked in name only.
       - name: Install the project with development dependencies
-        run: uv pip install -e ".[dev]"
+        run: uv sync --locked --all-extras
 
       # No continue-on-error and no step conditions below: whichever gate
       # fails, fails the job. Ordered cheapest first.
