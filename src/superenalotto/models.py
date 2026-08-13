@@ -30,6 +30,16 @@ class Extraction:
         "superstar",
     )
 
+    def describe_payload(self) -> str:
+        """Return a readable summary of the drawn values.
+
+        Used by the conflict diagnostics that report two records claiming the
+        same contest number and date with different results.
+        """
+        numbers = ", ".join(str(number) for number in self.numbers)
+
+        return f"numbers=[{numbers}] jolly={self.jolly} superstar={self.superstar}"
+
     def as_dict(self) -> dict[str, object]:
         """Return the extraction as a serializable dictionary."""
         return {

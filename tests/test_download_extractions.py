@@ -373,6 +373,119 @@ def test_process_month_rejects_extractions_outside_requested_month(
         )
 
 
+CONFLICTING_ROWS_HTML = """
+<table>
+    <tr>
+        <td>Concorso Nº 105 del 2 Luglio 2026</td>
+        <td>4 17 19 23 47 59</td>
+        <td>51</td>
+        <td>82</td>
+        <td>Dettagli</td>
+    </tr>
+
+    <tr>
+        <td>Concorso Nº 105 del 2 Luglio 2026</td>
+        <td>1 2 3 4 5 6</td>
+        <td>51</td>
+        <td>82</td>
+        <td>Dettagli</td>
+    </tr>
+</table>
+"""
+
+
+def test_process_month_rejects_conflicting_rows_in_archive_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        download_extractions,
+        "RAW_DATA_DIRECTORY",
+        tmp_path,
+    )
+
+    def fake_download_month(
+        year: int,
+        month: int,
+        *,
+        session: requests.Session,
+        force: bool = False,
+    ) -> Path:
+        path = tmp_path / "2026-07.html"
+        path.write_text(
+            CONFLICTING_ROWS_HTML,
+            encoding="utf-8",
+        )
+
+        return path
+
+    monkeypatch.setattr(
+        download_extractions,
+        "download_month",
+        fake_download_month,
+    )
+
+    with (
+        requests.Session() as session,
+        pytest.raises(
+            ScrapingError,
+            match="conflicting payloads",
+        ),
+    ):
+        download_extractions.process_month(
+            2026,
+            7,
+            session=session,
+        )
+
+
+def test_download_interval_reports_conflicting_rows_as_month_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        download_extractions,
+        "RAW_DATA_DIRECTORY",
+        tmp_path,
+    )
+
+    def fake_download_month(
+        year: int,
+        month: int,
+        *,
+        session: requests.Session,
+        force: bool = False,
+    ) -> Path:
+        path = tmp_path / "2026-07.html"
+        path.write_text(
+            CONFLICTING_ROWS_HTML,
+            encoding="utf-8",
+        )
+
+        return path
+
+    monkeypatch.setattr(
+        download_extractions,
+        "download_month",
+        fake_download_month,
+    )
+
+    extractions, failures = download_extractions.download_interval(
+        2026,
+        7,
+        2026,
+        7,
+    )
+
+    assert extractions == []
+    assert len(failures) == 1
+
+    year, month, error = failures[0]
+
+    assert (year, month) == (2026, 7)
+    assert "conflicting payloads" in error
+
+
 def test_deduplicate_extractions() -> None:
     first = make_extraction(
         105,
