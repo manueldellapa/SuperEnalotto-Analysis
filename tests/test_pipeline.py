@@ -1,121 +1,79 @@
-"""Tests for the historical SuperEnalotto download script."""
+"""Tests for the SuperEnalotto download and persistence pipeline."""
 
 from __future__ import annotations
 
-import argparse
 import csv
 import logging
-import sys
 from datetime import date
 from pathlib import Path
-from typing import Self
 
 import pytest
 import requests
 
-from scripts import download_extractions
+from superenalotto import pipeline
 from superenalotto.models import Extraction
+from superenalotto.paths import DataPaths
 from superenalotto.scraper import ScrapingError
-
-
-def freeze_today(
-    monkeypatch: pytest.MonkeyPatch,
-    today_value: date,
-) -> None:
-    """Pin the current date seen by the download script."""
-
-    class FrozenDate(date):
-        @classmethod
-        def today(cls) -> Self:
-            return cls(
-                today_value.year,
-                today_value.month,
-                today_value.day,
-            )
-
-    monkeypatch.setattr(
-        download_extractions,
-        "date",
-        FrozenDate,
-    )
-
-
-def make_extraction(
-    contest_number: int,
-    extraction_date: date,
-    *,
-    numbers: tuple[int, int, int, int, int, int] = (4, 17, 19, 23, 47, 59),
-    jolly: int = 51,
-    superstar: int = 82,
-) -> Extraction:
-    """Create a valid extraction for tests."""
-    return Extraction(
-        contest_number=contest_number,
-        extraction_date=extraction_date,
-        numbers=numbers,
-        jolly=jolly,
-        superstar=superstar,
-    )
-
-
-def test_build_raw_file_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    path = download_extractions.build_raw_file_path(
-        2026,
-        7,
-    )
-
-    assert path == tmp_path / "2026-07.html"
+from tests.support import freeze_today, make_extraction
 
 
 def test_save_and_load_raw_html(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
-    )
+    paths = DataPaths.from_root(tmp_path)
 
     html = "<html><body>SuperEnalotto</body></html>"
 
-    path = download_extractions.save_raw_html(
+    path = pipeline.save_raw_html(
         html,
+        paths=paths,
         year=2026,
         month=7,
     )
 
-    assert path == tmp_path / "2026-07.html"
+    assert path == tmp_path / "raw" / "2026-07.html"
     assert path.exists()
 
-    loaded_html = download_extractions.load_raw_html(
+    loaded_html = pipeline.load_raw_html(
         2026,
         7,
+        paths=paths,
     )
 
     assert loaded_html == html
+
+
+def test_save_raw_html_creates_a_missing_data_directory(
+    tmp_path: Path,
+) -> None:
+    paths = DataPaths.from_root(tmp_path / "custom" / "nested")
+
+    path = pipeline.save_raw_html(
+        "<html>archive</html>",
+        paths=paths,
+        year=2026,
+        month=7,
+    )
+
+    assert path == tmp_path / "custom" / "nested" / "raw" / "2026-07.html"
+    assert path.exists()
 
 
 def test_save_raw_html_preserves_existing_file_on_write_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
+    paths = DataPaths.from_root(tmp_path)
+
+    paths.raw_directory.mkdir(
+        parents=True,
     )
 
-    existing_file = tmp_path / "2026-07.html"
+    existing_file = paths.raw_html_path(
+        2026,
+        7,
+    )
+
     existing_file.write_text(
         "<html>good</html>",
         encoding="utf-8",
@@ -131,8 +89,9 @@ def test_save_raw_html_preserves_existing_file_on_write_failure(
     )
 
     with pytest.raises(OSError):
-        download_extractions.save_raw_html(
+        pipeline.save_raw_html(
             "<html>new</html>",
+            paths=paths,
             year=2026,
             month=7,
         )
@@ -149,13 +108,17 @@ def test_download_month_uses_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
+    paths = DataPaths.from_root(tmp_path)
+
+    paths.raw_directory.mkdir(
+        parents=True,
     )
 
-    cached_file = tmp_path / "2026-07.html"
+    cached_file = paths.raw_html_path(
+        2026,
+        7,
+    )
+
     cached_file.write_text(
         "<html>cached</html>",
         encoding="utf-8",
@@ -175,15 +138,16 @@ def test_download_month_uses_cache(
         return "<html>downloaded</html>"
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "download_archive_page",
         fake_download_archive_page,
     )
 
     with requests.Session() as session:
-        result = download_extractions.download_month(
+        result = pipeline.download_month(
             2026,
             7,
+            paths=paths,
             session=session,
         )
 
@@ -202,13 +166,17 @@ def test_download_month_force_redownloads_cached_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
+    paths = DataPaths.from_root(tmp_path)
+
+    paths.raw_directory.mkdir(
+        parents=True,
     )
 
-    cached_file = tmp_path / "2026-07.html"
+    cached_file = paths.raw_html_path(
+        2026,
+        7,
+    )
+
     cached_file.write_text(
         "<html>old</html>",
         encoding="utf-8",
@@ -227,15 +195,16 @@ def test_download_month_force_redownloads_cached_file(
         return "<html>new</html>"
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "download_archive_page",
         fake_download_archive_page,
     )
 
     with requests.Session() as session:
-        result = download_extractions.download_month(
+        result = pipeline.download_month(
             2026,
             7,
+            paths=paths,
             session=session,
             force=True,
         )
@@ -250,15 +219,49 @@ def test_download_month_force_redownloads_cached_file(
     )
 
 
+def test_download_month_writes_into_a_custom_data_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = DataPaths.from_root(tmp_path / "elsewhere")
+
+    def fake_download_archive_page(
+        year: int,
+        month: int,
+        *,
+        session: requests.Session | None = None,
+    ) -> str:
+        return "<html>downloaded</html>"
+
+    monkeypatch.setattr(
+        pipeline,
+        "download_archive_page",
+        fake_download_archive_page,
+    )
+
+    with requests.Session() as session:
+        result = pipeline.download_month(
+            2026,
+            7,
+            paths=paths,
+            session=session,
+        )
+
+    assert result == tmp_path / "elsewhere" / "raw" / "2026-07.html"
+
+    assert (
+        result.read_text(
+            encoding="utf-8",
+        )
+        == "<html>downloaded</html>"
+    )
+
+
 def test_process_month_parses_cached_html(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
-    )
+    paths = DataPaths.from_root(tmp_path)
 
     extraction = make_extraction(
         105,
@@ -269,6 +272,7 @@ def test_process_month_parses_cached_html(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> Path:
@@ -291,21 +295,22 @@ def test_process_month_parses_cached_html(
         return [extraction]
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "download_month",
         fake_download_month,
     )
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "parse_archive_page",
         fake_parse_archive_page,
     )
 
     with requests.Session() as session:
-        result = download_extractions.process_month(
+        result = pipeline.process_month(
             2026,
             7,
+            paths=paths,
             session=session,
         )
 
@@ -316,11 +321,7 @@ def test_process_month_rejects_extractions_outside_requested_month(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
-    )
+    paths = DataPaths.from_root(tmp_path)
 
     wrong_month_extraction = make_extraction(
         105,
@@ -331,6 +332,7 @@ def test_process_month_rejects_extractions_outside_requested_month(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> Path:
@@ -348,13 +350,13 @@ def test_process_month_rejects_extractions_outside_requested_month(
         return [wrong_month_extraction]
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "download_month",
         fake_download_month,
     )
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "parse_archive_page",
         fake_parse_archive_page,
     )
@@ -366,9 +368,10 @@ def test_process_month_rejects_extractions_outside_requested_month(
             match="outside requested",
         ),
     ):
-        download_extractions.process_month(
+        pipeline.process_month(
             2026,
             7,
+            paths=paths,
             session=session,
         )
 
@@ -398,16 +401,13 @@ def test_process_month_rejects_conflicting_rows_in_archive_page(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
-    )
+    paths = DataPaths.from_root(tmp_path)
 
     def fake_download_month(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> Path:
@@ -420,7 +420,7 @@ def test_process_month_rejects_conflicting_rows_in_archive_page(
         return path
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "download_month",
         fake_download_month,
     )
@@ -432,9 +432,10 @@ def test_process_month_rejects_conflicting_rows_in_archive_page(
             match="conflicting payloads",
         ),
     ):
-        download_extractions.process_month(
+        pipeline.process_month(
             2026,
             7,
+            paths=paths,
             session=session,
         )
 
@@ -443,16 +444,13 @@ def test_download_interval_reports_conflicting_rows_as_month_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "RAW_DATA_DIRECTORY",
-        tmp_path,
-    )
+    paths = DataPaths.from_root(tmp_path)
 
     def fake_download_month(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> Path:
@@ -465,16 +463,17 @@ def test_download_interval_reports_conflicting_rows_as_month_failure(
         return path
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "download_month",
         fake_download_month,
     )
 
-    extractions, failures = download_extractions.download_interval(
+    extractions, failures = pipeline.download_interval(
         2026,
         7,
         2026,
         7,
+        paths=paths,
     )
 
     assert extractions == []
@@ -497,7 +496,7 @@ def test_deduplicate_extractions() -> None:
         date(2026, 7, 3),
     )
 
-    result = download_extractions.deduplicate_extractions(
+    result = pipeline.deduplicate_extractions(
         [
             second,
             first,
@@ -525,7 +524,7 @@ def test_deduplicate_extractions_warns_on_conflicting_dates(
     )
 
     with caplog.at_level(logging.WARNING):
-        download_extractions.deduplicate_extractions(
+        pipeline.deduplicate_extractions(
             [
                 first,
                 conflicting,
@@ -548,7 +547,7 @@ def test_deduplicate_extractions_collapses_equal_duplicates() -> None:
 
     assert first is not identical
 
-    result = download_extractions.deduplicate_extractions(
+    result = pipeline.deduplicate_extractions(
         [
             first,
             identical,
@@ -571,10 +570,10 @@ def test_deduplicate_extractions_raises_on_conflicting_numbers() -> None:
     )
 
     with pytest.raises(
-        download_extractions.ExtractionConflictError,
+        pipeline.ExtractionConflictError,
         match="conflicting payloads",
     ) as exc_info:
-        download_extractions.deduplicate_extractions(
+        pipeline.deduplicate_extractions(
             [
                 first,
                 conflicting,
@@ -616,8 +615,8 @@ def test_deduplicate_extractions_raises_on_any_conflicting_field(
         date(2026, 7, 2),
     )
 
-    with pytest.raises(download_extractions.ExtractionConflictError):
-        download_extractions.deduplicate_extractions(
+    with pytest.raises(pipeline.ExtractionConflictError):
+        pipeline.deduplicate_extractions(
             [
                 first,
                 conflicting,
@@ -636,7 +635,7 @@ def test_deduplicate_extractions_allows_same_payload_on_different_contests() -> 
         date(2026, 7, 4),
     )
 
-    result = download_extractions.deduplicate_extractions(
+    result = pipeline.deduplicate_extractions(
         [
             first,
             second,
@@ -659,7 +658,7 @@ def test_save_extractions_csv(
         date(2026, 7, 2),
     )
 
-    result = download_extractions.save_extractions_csv(
+    result = pipeline.save_extractions_csv(
         [extraction],
         output_path=output_path,
     )
@@ -689,6 +688,25 @@ def test_save_extractions_csv(
     ]
 
 
+def test_save_extractions_csv_creates_a_missing_output_directory(
+    tmp_path: Path,
+) -> None:
+    paths = DataPaths.from_root(tmp_path / "custom")
+
+    extraction = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    result = pipeline.save_extractions_csv(
+        [extraction],
+        output_path=paths.extractions_csv,
+    )
+
+    assert result == tmp_path / "custom" / "processed" / "extractions.csv"
+    assert result.exists()
+
+
 def test_save_extractions_csv_preserves_existing_file_on_write_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -715,7 +733,7 @@ def test_save_extractions_csv_preserves_existing_file_on_write_failure(
     )
 
     with pytest.raises(OSError):
-        download_extractions.save_extractions_csv(
+        pipeline.save_extractions_csv(
             [extraction],
             output_path=output_path,
         )
@@ -730,7 +748,7 @@ def test_save_extractions_csv_preserves_existing_file_on_write_failure(
 
 def test_iter_year_months_single_month() -> None:
     result = list(
-        download_extractions.iter_year_months(
+        pipeline.iter_year_months(
             2026,
             7,
             2026,
@@ -745,7 +763,7 @@ def test_iter_year_months_single_month() -> None:
 
 def test_iter_year_months_same_year() -> None:
     result = list(
-        download_extractions.iter_year_months(
+        pipeline.iter_year_months(
             2026,
             7,
             2026,
@@ -762,7 +780,7 @@ def test_iter_year_months_same_year() -> None:
 
 def test_iter_year_months_crosses_year_boundary() -> None:
     result = list(
-        download_extractions.iter_year_months(
+        pipeline.iter_year_months(
             2025,
             11,
             2026,
@@ -792,7 +810,7 @@ def test_validate_interval_rejects_invalid_months(
     end_month: int,
 ) -> None:
     with pytest.raises(ValueError):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             2025,
             start_month,
             2026,
@@ -805,7 +823,7 @@ def test_validate_interval_rejects_reversed_interval() -> None:
         ValueError,
         match="must not be after",
     ):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             2026,
             7,
             2025,
@@ -814,7 +832,7 @@ def test_validate_interval_rejects_reversed_interval() -> None:
 
 
 def test_validate_interval_accepts_valid_interval() -> None:
-    download_extractions.validate_interval(
+    pipeline.validate_interval(
         2024,
         1,
         2026,
@@ -827,7 +845,7 @@ def test_validate_interval_rejects_implausible_start_year() -> None:
         ValueError,
         match="start year must be between",
     ):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             1,
             1,
             9999,
@@ -840,7 +858,7 @@ def test_validate_interval_rejects_future_end_year() -> None:
         ValueError,
         match="end year must be between",
     ):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             2024,
             1,
             2200,
@@ -853,10 +871,11 @@ def test_validate_interval_accepts_current_month(
 ) -> None:
     freeze_today(
         monkeypatch,
+        pipeline,
         date(2026, 6, 15),
     )
 
-    download_extractions.validate_interval(
+    pipeline.validate_interval(
         2026,
         1,
         2026,
@@ -869,10 +888,11 @@ def test_validate_interval_accepts_december_of_past_year(
 ) -> None:
     freeze_today(
         monkeypatch,
+        pipeline,
         date(2026, 6, 15),
     )
 
-    download_extractions.validate_interval(
+    pipeline.validate_interval(
         2025,
         1,
         2025,
@@ -885,6 +905,7 @@ def test_validate_interval_rejects_future_end_month(
 ) -> None:
     freeze_today(
         monkeypatch,
+        pipeline,
         date(2026, 6, 15),
     )
 
@@ -892,7 +913,7 @@ def test_validate_interval_rejects_future_end_month(
         ValueError,
         match="end year/month must not be in the future",
     ):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             2026,
             1,
             2026,
@@ -905,6 +926,7 @@ def test_validate_interval_rejects_future_start_month(
 ) -> None:
     freeze_today(
         monkeypatch,
+        pipeline,
         date(2026, 6, 15),
     )
 
@@ -912,7 +934,7 @@ def test_validate_interval_rejects_future_start_month(
         ValueError,
         match="start year/month must not be in the future",
     ):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             2026,
             7,
             2026,
@@ -925,10 +947,11 @@ def test_validate_interval_rejects_future_month_in_december(
 ) -> None:
     freeze_today(
         monkeypatch,
+        pipeline,
         date(2026, 12, 15),
     )
 
-    download_extractions.validate_interval(
+    pipeline.validate_interval(
         2026,
         1,
         2026,
@@ -939,7 +962,7 @@ def test_validate_interval_rejects_future_month_in_december(
         ValueError,
         match="end year must be between",
     ):
-        download_extractions.validate_interval(
+        pipeline.validate_interval(
             2026,
             1,
             2027,
@@ -947,108 +970,8 @@ def test_validate_interval_rejects_future_month_in_december(
         )
 
 
-def test_resolve_interval_single_month() -> None:
-    args = argparse.Namespace(
-        start_year=2026,
-        start_month=7,
-        end_year=None,
-        end_month=None,
-    )
-
-    assert download_extractions.resolve_interval(args) == (
-        2026,
-        7,
-        2026,
-        7,
-    )
-
-
-def test_resolve_interval_defaults_end_month_to_december_for_past_year(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    freeze_today(
-        monkeypatch,
-        date(2026, 6, 15),
-    )
-
-    args = argparse.Namespace(
-        start_year=2024,
-        start_month=7,
-        end_year=2025,
-        end_month=None,
-    )
-
-    assert download_extractions.resolve_interval(args) == (
-        2024,
-        7,
-        2025,
-        12,
-    )
-
-
-def test_resolve_interval_defaults_end_month_to_current_month(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    freeze_today(
-        monkeypatch,
-        date(2026, 6, 15),
-    )
-
-    args = argparse.Namespace(
-        start_year=2024,
-        start_month=7,
-        end_year=2026,
-        end_month=None,
-    )
-
-    assert download_extractions.resolve_interval(args) == (
-        2024,
-        7,
-        2026,
-        6,
-    )
-
-
-def test_resolve_interval_explicit_end_month_wins_for_current_year(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    freeze_today(
-        monkeypatch,
-        date(2026, 6, 15),
-    )
-
-    args = argparse.Namespace(
-        start_year=2026,
-        start_month=1,
-        end_year=2026,
-        end_month=3,
-    )
-
-    assert download_extractions.resolve_interval(args) == (
-        2026,
-        1,
-        2026,
-        3,
-    )
-
-
-def test_resolve_interval_explicit_range() -> None:
-    args = argparse.Namespace(
-        start_year=2024,
-        start_month=2,
-        end_year=2026,
-        end_month=7,
-    )
-
-    assert download_extractions.resolve_interval(args) == (
-        2024,
-        2,
-        2026,
-        7,
-    )
-
-
 def test_download_interval_collects_extractions(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     january = make_extraction(
@@ -1065,6 +988,7 @@ def test_download_interval_collects_extractions(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> list[Extraction]:
@@ -1079,16 +1003,17 @@ def test_download_interval_collects_extractions(
         raise AssertionError(f"Unexpected month: {month}")
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "process_month",
         fake_process_month,
     )
 
-    extractions, failures = download_extractions.download_interval(
+    extractions, failures = pipeline.download_interval(
         2024,
         1,
         2024,
         2,
+        paths=DataPaths.from_root(tmp_path),
     )
 
     assert extractions == [
@@ -1099,7 +1024,48 @@ def test_download_interval_collects_extractions(
     assert failures == []
 
 
+def test_download_interval_forwards_the_configured_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_paths = DataPaths.from_root(tmp_path / "custom")
+
+    seen_paths: list[DataPaths] = []
+
+    def fake_process_month(
+        year: int,
+        month: int,
+        *,
+        paths: DataPaths,
+        session: requests.Session,
+        force: bool = False,
+    ) -> list[Extraction]:
+        seen_paths.append(paths)
+
+        return []
+
+    monkeypatch.setattr(
+        pipeline,
+        "process_month",
+        fake_process_month,
+    )
+
+    pipeline.download_interval(
+        2024,
+        1,
+        2024,
+        2,
+        paths=expected_paths,
+    )
+
+    assert seen_paths == [
+        expected_paths,
+        expected_paths,
+    ]
+
+
 def test_download_interval_raises_on_conflicting_payloads(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     january = make_extraction(
@@ -1117,6 +1083,7 @@ def test_download_interval_raises_on_conflicting_payloads(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> list[Extraction]:
@@ -1126,24 +1093,26 @@ def test_download_interval_raises_on_conflicting_payloads(
         return [conflicting_january]
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "process_month",
         fake_process_month,
     )
 
     with pytest.raises(
-        download_extractions.ExtractionConflictError,
+        pipeline.ExtractionConflictError,
         match="conflicting payloads",
     ):
-        download_extractions.download_interval(
+        pipeline.download_interval(
             2024,
             1,
             2024,
             2,
+            paths=DataPaths.from_root(tmp_path),
         )
 
 
 def test_download_interval_continues_after_failed_month(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     january = make_extraction(
@@ -1162,6 +1131,7 @@ def test_download_interval_continues_after_failed_month(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> list[Extraction]:
@@ -1179,16 +1149,17 @@ def test_download_interval_continues_after_failed_month(
         raise AssertionError(f"Unexpected month: {month}")
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "process_month",
         fake_process_month,
     )
 
-    extractions, failures = download_extractions.download_interval(
+    extractions, failures = pipeline.download_interval(
         2024,
         1,
         2024,
         3,
+        paths=DataPaths.from_root(tmp_path),
     )
 
     assert processed_months == [
@@ -1212,28 +1183,31 @@ def test_download_interval_continues_after_failed_month(
 
 
 def test_download_interval_handles_scraping_error(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_process_month(
         year: int,
         month: int,
         *,
+        paths: DataPaths,
         session: requests.Session,
         force: bool = False,
     ) -> list[Extraction]:
         raise ScrapingError("invalid archive")
 
     monkeypatch.setattr(
-        download_extractions,
+        pipeline,
         "process_month",
         fake_process_month,
     )
 
-    extractions, failures = download_extractions.download_interval(
+    extractions, failures = pipeline.download_interval(
         2024,
         1,
         2024,
         1,
+        paths=DataPaths.from_root(tmp_path),
     )
 
     assert extractions == []
@@ -1246,364 +1220,23 @@ def test_download_interval_handles_scraping_error(
     )
 
 
-def test_build_argument_parser_defaults() -> None:
-    parser = download_extractions.build_argument_parser()
-
-    args = parser.parse_args(
-        [
-            "--start-year",
-            "2024",
-        ]
-    )
-
-    assert args.start_year == 2024
-    assert args.start_month == 1
-    assert args.end_year is None
-    assert args.end_month is None
-    assert args.force is False
-    assert args.verbose is False
-
-
-def test_build_argument_parser_parses_full_arguments() -> None:
-    parser = download_extractions.build_argument_parser()
-
-    args = parser.parse_args(
-        [
-            "--start-year",
-            "2024",
-            "--start-month",
-            "3",
-            "--end-year",
-            "2026",
-            "--end-month",
-            "7",
-            "--force",
-            "--verbose",
-        ]
-    )
-
-    assert args.start_year == 2024
-    assert args.start_month == 3
-    assert args.end_year == 2026
-    assert args.end_month == 7
-    assert args.force is True
-    assert args.verbose is True
-
-
-def test_main_returns_zero_on_full_success(
+def test_count_csv_rows_returns_none_for_missing_file(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    extraction = make_extraction(
-        105,
-        date(2026, 7, 2),
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        assert (
-            start_year,
-            start_month,
-            end_year,
-            end_month,
-        ) == (2026, 7, 2026, 7)
-
-        return [extraction], []
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    exit_code = download_extractions.main()
-
-    assert exit_code == 0
-    assert (tmp_path / "extractions.csv").exists()
+    assert pipeline.count_csv_rows(tmp_path / "absent.csv") is None
 
 
-def test_main_returns_one_on_partial_failures(
+def test_count_csv_rows_excludes_the_header(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
+    path = tmp_path / "extractions.csv"
 
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        return [], [(2026, 7, "boom")]
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    exit_code = download_extractions.main()
-
-    assert exit_code == 1
-
-
-def test_main_returns_one_on_invalid_interval(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "9999",
-        ],
-    )
-
-    exit_code = download_extractions.main()
-
-    assert exit_code == 1
-
-
-def test_main_preserves_canonical_csv_on_conflicting_payloads(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    canonical_csv = tmp_path / "extractions.csv"
-    canonical_csv.write_text(
+    path.write_text(
         "contest_number\n1\n2\n3\n",
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        raise download_extractions.ExtractionConflictError(
-            "Contest 105 on 2026-07-02 has conflicting payloads"
-        )
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    with caplog.at_level(logging.ERROR):
-        exit_code = download_extractions.main()
-
-    assert exit_code == 1
-    assert "Data integrity error" in caplog.text
-    assert "conflicting payloads" in caplog.text
-
-    assert canonical_csv.read_text(encoding="utf-8") == "contest_number\n1\n2\n3\n"
-    assert not (tmp_path / "extractions.partial.csv").exists()
-
-
-def test_main_preserves_canonical_csv_on_partial_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    existing_csv = tmp_path / "extractions.csv"
-    existing_csv.write_text(
-        "contest_number\n1\n2\n3\n",
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    extraction = make_extraction(
-        105,
-        date(2026, 7, 2),
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        return [extraction], [(2026, 7, "boom")]
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    with caplog.at_level(logging.WARNING):
-        exit_code = download_extractions.main()
-
-    assert exit_code == 1
-
-    assert (
-        existing_csv.read_text(
-            encoding="utf-8",
-        )
-        == "contest_number\n1\n2\n3\n"
-    )
-
-    partial_csv = tmp_path / "extractions.partial.csv"
-
-    assert partial_csv.exists()
-
-    with partial_csv.open(
-        encoding="utf-8",
-        newline="",
-    ) as csv_file:
-        rows = list(csv.DictReader(csv_file))
-
-    assert len(rows) == 1
-    assert rows[0]["contest_number"] == "105"
-
-    assert "Preserved" in caplog.text
-
-
-def test_main_writes_partial_csv_when_canonical_is_absent(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    extraction = make_extraction(
-        105,
-        date(2026, 7, 2),
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        return [extraction], [(2026, 7, "boom")]
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    with caplog.at_level(logging.WARNING):
-        exit_code = download_extractions.main()
-
-    assert exit_code == 1
-    assert not (tmp_path / "extractions.csv").exists()
-    assert (tmp_path / "extractions.partial.csv").exists()
-    assert "unwritten" in caplog.text
+    assert pipeline.count_csv_rows(path) == 3
 
 
 def test_remove_partial_extractions_csv_deletes_existing_file(
@@ -1615,7 +1248,7 @@ def test_remove_partial_extractions_csv_deletes_existing_file(
         encoding="utf-8",
     )
 
-    assert download_extractions.remove_partial_extractions_csv(partial_csv) is True
+    assert pipeline.remove_partial_extractions_csv(partial_csv) is True
     assert not partial_csv.exists()
 
 
@@ -1624,7 +1257,7 @@ def test_remove_partial_extractions_csv_ignores_missing_file(
 ) -> None:
     partial_csv = tmp_path / "extractions.partial.csv"
 
-    assert download_extractions.remove_partial_extractions_csv(partial_csv) is False
+    assert pipeline.remove_partial_extractions_csv(partial_csv) is False
 
 
 def test_remove_partial_extractions_csv_warns_on_failed_removal(
@@ -1648,117 +1281,8 @@ def test_remove_partial_extractions_csv_warns_on_failed_removal(
     )
 
     with caplog.at_level(logging.WARNING):
-        removed = download_extractions.remove_partial_extractions_csv(partial_csv)
+        removed = pipeline.remove_partial_extractions_csv(partial_csv)
 
     assert removed is False
     assert partial_csv.exists()
     assert "Could not remove stale partial CSV" in caplog.text
-
-
-def test_main_removes_stale_partial_csv_on_success(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    stale_partial = tmp_path / "extractions.partial.csv"
-    stale_partial.write_text(
-        "contest_number\n999\n",
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    extraction = make_extraction(
-        105,
-        date(2026, 7, 2),
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        return [extraction], []
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    exit_code = download_extractions.main()
-
-    assert exit_code == 0
-    assert (tmp_path / "extractions.csv").exists()
-    assert not stale_partial.exists()
-
-
-def test_main_keeps_partial_csv_when_run_has_failures(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        download_extractions,
-        "PROCESSED_DATA_DIRECTORY",
-        tmp_path,
-    )
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "download_extractions.py",
-            "--start-year",
-            "2026",
-            "--start-month",
-            "7",
-            "--end-month",
-            "7",
-        ],
-    )
-
-    extraction = make_extraction(
-        105,
-        date(2026, 7, 2),
-    )
-
-    def fake_download_interval(
-        start_year: int,
-        start_month: int,
-        end_year: int,
-        end_month: int,
-        *,
-        force: bool = False,
-    ) -> tuple[list[Extraction], list[tuple[int, int, str]]]:
-        return [extraction], [(2026, 7, "boom")]
-
-    monkeypatch.setattr(
-        download_extractions,
-        "download_interval",
-        fake_download_interval,
-    )
-
-    exit_code = download_extractions.main()
-
-    assert exit_code == 1
-    assert (tmp_path / "extractions.partial.csv").exists()
