@@ -16,6 +16,8 @@ historical SuperEnalotto extraction data from the official archive.
 - Deduplicate extraction records and reject conflicting duplicates
 - Export consolidated results to CSV
 - Retry failed HTTP requests with configurable backoff
+- Installable `superenalotto-download` command
+- Configurable data directory
 - Unit tests with pytest
 - Static type checking with mypy
 - Linting with Ruff
@@ -74,15 +76,21 @@ not age unattended. See `.github/dependabot.yml`.
 
 ## Usage
 
-The downloader walks an inclusive interval of months, one archive page per
-month, and consolidates everything it parses into a single CSV.
+Installing the project registers a `superenalotto-download` command. It walks
+an inclusive interval of months, one archive page per month, and consolidates
+everything it parses into a single CSV.
 
 ```bash
-python scripts/download_extractions.py --start-year 2024
+superenalotto-download --start-year 2024
 ```
 
 The examples below assume the virtual environment is active. Otherwise prefix
-them with `uv run` or call `.venv/bin/python` directly.
+them with `uv run`, or call `.venv/bin/superenalotto-download` directly.
+
+> [!NOTE]
+> `python scripts/download_extractions.py` still works and behaves identically.
+> It is a thin launcher kept for compatibility; the implementation lives in
+> `superenalotto.cli`.
 
 ### Options
 
@@ -92,6 +100,7 @@ them with `uv run` or call `.venv/bin/python` directly.
 | `--start-month` | `1` | First month to download (1–12). |
 | `--end-year` | `--start-year` | Last year to download. |
 | `--end-month` | *see below* | Last month to download (1–12). |
+| `--data-dir` | *see below* | Root directory for cached pages and datasets. |
 | `--force` | off | Re-download archive pages even when already cached. |
 | `--verbose` | off | Enable debug-level logging. |
 
@@ -108,40 +117,58 @@ start must not be after end, and neither endpoint may be in the future.
 A single month:
 
 ```bash
-python scripts/download_extractions.py --start-year 2024 --start-month 3 --end-month 3
+superenalotto-download --start-year 2024 --start-month 3 --end-month 3
 ```
 
 One full year:
 
 ```bash
-python scripts/download_extractions.py --start-year 2024
+superenalotto-download --start-year 2024
 ```
 
 An interval spanning several years:
 
 ```bash
-python scripts/download_extractions.py --start-year 2020 --start-month 6 --end-year 2024 --end-month 12
+superenalotto-download --start-year 2020 --start-month 6 --end-year 2024 --end-month 12
 ```
 
 Everything from the first available year to today:
 
 ```bash
-python scripts/download_extractions.py --start-year 1997 --end-year 2026
+superenalotto-download --start-year 1997 --end-year 2026
+```
+
+Store the data somewhere other than the checkout:
+
+```bash
+superenalotto-download --start-year 2024 --data-dir ~/superenalotto-data
 ```
 
 Refresh pages already on disk, with verbose logging:
 
 ```bash
-python scripts/download_extractions.py --start-year 2024 --force --verbose
+superenalotto-download --start-year 2024 --force --verbose
 ```
 
 ## Output
 
-There is no `data/` directory in a fresh checkout; it is created on the first
-run. Both subdirectories are gitignored.
+### Where the data goes
+
+`--data-dir` chooses the root directory; `raw/` and `processed/` are always
+created underneath it, and both are created on the first run.
+
+When it is omitted the default is `data/` next to the source checkout, which is
+where this project has always written — running from a clone behaves exactly as
+before. Installed anywhere else, the package's own location says nothing about
+where you want your files, so the default becomes `./data` relative to the
+current working directory. Passing `--data-dir` removes the ambiguity entirely
+and is the recommended form outside a checkout.
+
+There is no `data/` directory in a fresh checkout. Inside the repository both
+subdirectories are gitignored.
 
 ```text
-data/
+<data-dir>/
 ├── raw/                        one cached HTML page per month
 │   ├── 2024-01.html
 │   └── 2024-02.html
@@ -149,7 +176,10 @@ data/
     └── extractions.csv         the consolidated dataset
 ```
 
-### `data/raw/`
+Each root is self-contained: pointing two runs at two directories keeps two
+independent caches and two independent datasets.
+
+### `raw/`
 
 One archive page per month, named `{year}-{month:02d}.html`. Cached pages are
 reused on later runs unless `--force` is passed, which makes re-runs cheap and
@@ -158,7 +188,7 @@ lets an interrupted download resume without re-fetching what it already has.
 Rebuilding the CSV from cached pages costs no network traffic, so widening an
 interval later is inexpensive.
 
-### `data/processed/extractions.csv`
+### `processed/extractions.csv`
 
 The consolidated dataset: deduplicated, validated, and sorted by extraction
 date and then contest number.
@@ -171,7 +201,7 @@ date and then contest number.
 > cheap.
 
 If any month fails, the canonical file is left untouched and the partial
-results are written to `data/processed/extractions.partial.csv` instead, so a
+results are written to `processed/extractions.partial.csv` instead, so a
 half-finished run never replaces good data. A later fully successful run
 removes that stale partial file.
 
@@ -239,22 +269,28 @@ request green.
 
 ```text
 .
-├── src/superenalotto/          the installable library
-│   ├── constants.py            paths, URLs, HTTP policy, game rules
+├── src/superenalotto/          the installable package
+│   ├── constants.py            URLs, HTTP policy, game rules, path names
 │   ├── models.py               the Extraction domain entity and CSV schema
 │   ├── validators.py           field validation
-│   └── scraper.py              HTTP client and HTML parsing
+│   ├── scraper.py              HTTP client and HTML parsing
+│   ├── paths.py                the data directory layout
+│   ├── pipeline.py             caching, CSV I/O, interval orchestration
+│   └── cli.py                  argument parsing and exit codes
 ├── scripts/
-│   └── download_extractions.py the CLI: filesystem, CSV, orchestration
+│   └── download_extractions.py compatibility launcher for the CLI
 ├── tests/                      mirrors src/superenalotto one-to-one
 ├── pyproject.toml              project metadata, dependencies, tool config
 └── uv.lock                     the pinned dependency set
 ```
 
-The split is deliberate. The library holds pure parsing, validation, and domain
-logic and performs no filesystem work, which keeps it unit-testable without
-touching disk. The script owns all file and CSV I/O. Only `src/` is installed
-as a package; `scripts/` is a plain script directory that imports it.
+The layering is deliberate. `models`, `validators` and `scraper` hold pure
+parsing, validation and domain logic and never touch the filesystem, which
+keeps them unit-testable without touching disk. `pipeline` is the only module
+that reads or writes files, and it receives every path it uses as an argument
+rather than reading module-level state — so the scraping logic stays reusable
+on its own, and nothing is tied to where the package happens to be installed.
+`cli` adds only argument parsing on top.
 
 ## License
 

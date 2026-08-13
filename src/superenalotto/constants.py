@@ -11,9 +11,11 @@ from typing import Final
 
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
-DATA_DIRECTORY: Final[Path] = PROJECT_ROOT / "data"
-RAW_DATA_DIRECTORY: Final[Path] = DATA_DIRECTORY / "raw"
-PROCESSED_DATA_DIRECTORY: Final[Path] = DATA_DIRECTORY / "processed"
+# Directory names only: the data root itself is chosen at runtime, so nothing
+# here hard-codes where a given run stores its files. See paths.DataPaths.
+DATA_DIRECTORY_NAME: Final[str] = "data"
+RAW_DIRECTORY_NAME: Final[str] = "raw"
+PROCESSED_DIRECTORY_NAME: Final[str] = "processed"
 
 
 # -----------------------------------------------------------------------------
