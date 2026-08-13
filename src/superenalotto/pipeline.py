@@ -147,7 +147,11 @@ def process_month(
     session: requests.Session,
     force: bool = False,
 ) -> list[Extraction]:
-    """Download, cache and parse one monthly archive."""
+    """Download, cache and parse one monthly archive.
+
+    Parser-rejected HTML is removed so a later run downloads a fresh copy
+    instead of reusing a poisoned cache entry indefinitely.
+    """
     path = download_month(
         year,
         month,
@@ -160,20 +164,39 @@ def process_month(
         encoding="utf-8",
     )
 
-    extractions = parse_archive_page(
-        html,
-    )
+    try:
+        extractions = parse_archive_page(
+            html,
+        )
 
-    for extraction in extractions:
-        if (
-            extraction.extraction_date.year,
-            extraction.extraction_date.month,
-        ) != (year, month):
-            raise ScrapingError(
-                f"Contest {extraction.contest_number}: extraction date "
-                f"{extraction.extraction_date.isoformat()} is outside requested "
-                f"{year:04d}-{month:02d}"
+        for extraction in extractions:
+            if (
+                extraction.extraction_date.year,
+                extraction.extraction_date.month,
+            ) != (year, month):
+                raise ScrapingError(
+                    f"Contest {extraction.contest_number}: extraction date "
+                    f"{extraction.extraction_date.isoformat()} is outside requested "
+                    f"{year:04d}-{month:02d}"
+                )
+    except ScrapingError:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            LOGGER.warning(
+                "Could not remove invalid cached archive %s: %s",
+                path,
+                exc,
             )
+        else:
+            LOGGER.warning(
+                "Removed invalid cached archive: %s",
+                path,
+            )
+
+        raise
 
     LOGGER.info(
         "Parsed %d extraction(s) from %04d-%02d",

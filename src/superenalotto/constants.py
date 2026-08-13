@@ -26,6 +26,10 @@ BASE_URL: Final[str] = "https://www.superenalotto.it"
 
 ARCHIVE_URL_TEMPLATE: Final[str] = BASE_URL + "/archivio-estrazioni/{year}/{month}"
 
+# The game predates this, but the official online archive only exposes years
+# from 2009 onward.
+MIN_ARCHIVE_YEAR: Final[int] = 2009
+
 HTTP_TIMEOUT_SECONDS: Final[int] = 30
 
 HTTP_RETRIES: Final[int] = 4
@@ -80,8 +84,6 @@ MONTH_NAME_TO_NUMBER: Final[dict[str, int]] = {
 # -----------------------------------------------------------------------------
 # SuperEnalotto rules
 # -----------------------------------------------------------------------------
-
-MIN_ARCHIVE_YEAR: Final[int] = 1997  # SuperEnalotto's first year of operation
 
 MIN_NUMBER: Final[int] = 1
 MAX_NUMBER: Final[int] = 90

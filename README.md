@@ -109,8 +109,9 @@ was also omitted, becomes the current month if `--end-year` is the current
 year, and otherwise defaults to `12`.
 
 The interval is validated before any request is made. Months must be 1–12,
-years must fall between 1997 (SuperEnalotto's first year) and the current year,
-start must not be after end, and neither endpoint may be in the future.
+years must fall between 2009 (the first year exposed by the official online
+archive) and the current year, start must not be after end, and neither endpoint
+may be in the future.
 
 ### Examples
 
@@ -135,7 +136,7 @@ superenalotto-download --start-year 2020 --start-month 6 --end-year 2024 --end-m
 Everything from the first available year to today:
 
 ```bash
-superenalotto-download --start-year 1997 --end-year 2026
+superenalotto-download --start-year 2009 --end-year 2026
 ```
 
 Store the data somewhere other than the checkout:
@@ -184,6 +185,8 @@ independent caches and two independent datasets.
 One archive page per month, named `{year}-{month:02d}.html`. Cached pages are
 reused on later runs unless `--force` is passed, which makes re-runs cheap and
 lets an interrupted download resume without re-fetching what it already has.
+If a cached page is rejected by the parser, it is removed so the next run can
+download a fresh copy instead of repeatedly reusing invalid HTML.
 
 Rebuilding the CSV from cached pages costs no network traffic, so widening an
 interval later is inexpensive.
