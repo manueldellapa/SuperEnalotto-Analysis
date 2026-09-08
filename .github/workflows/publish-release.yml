@@ -192,13 +192,21 @@ jobs:
             exit 0
           fi
 
-          git fetch origin "${branch}:refs/remotes/origin/${branch}"
-          if ! git merge-base --is-ancestor "origin/${branch}" "$RELEASE_SHA"; then
-            echo "Refusing to delete ${branch}: it is not an ancestor of the released commit."
-            exit 1
+          merged_sha="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --state merged \
+            --limit 1 \
+            --json mergeCommit \
+            --jq '.[0].mergeCommit.oid // empty')"
+
+          if [[ "$merged_sha" != "$RELEASE_SHA" ]]; then
+            echo "Leaving ${branch} in place: no merged release PR maps it to ${RELEASE_SHA}."
+            exit 0
           fi
 
-          git push origin --delete "${branch}"
+          git push origin --delete "$branch"
 
       - name: Summary
         if: always()
