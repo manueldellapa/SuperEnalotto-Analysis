@@ -1,0 +1,49 @@
+name: Prepare release v0.2.0
+
+on:
+  push:
+    branches:
+      - release/v0.2.0
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Bump project version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("pyproject.toml")
+          text = path.read_text(encoding="utf-8")
+          old = 'version = "0.1.0"'
+          new = 'version = "0.2.0"'
+
+          if text.count(old) != 1:
+              raise SystemExit(f"expected exactly one {old!r} in pyproject.toml")
+
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+      - name: Refresh lockfile
+        run: uv lock
+
+      - name: Commit release metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git diff --cached --exit-code && { echo "No release metadata changes produced"; exit 1; }
+          git commit -m "chore(release): prepare v0.2.0"
+          git push
