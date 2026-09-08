@@ -97,18 +97,6 @@ jobs:
               stream.write(f"tag={tag}\n")
 
           if tag in existing_tags:
-              tagged_sha = subprocess.run(
-                  ["git", "rev-list", "-n", "1", tag],
-                  check=True,
-                  capture_output=True,
-                  text=True,
-              ).stdout.strip()
-              if tagged_sha != os.environ["RELEASE_SHA"]:
-                  raise SystemExit(
-                      f"{tag} already exists but points to {tagged_sha}, "
-                      f"not validated commit {os.environ['RELEASE_SHA']}"
-                  )
-
               release_exists = subprocess.run(
                   [
                       "gh",
@@ -123,14 +111,51 @@ jobs:
                   check=False,
               ).returncode == 0
 
-              with output.open("a", encoding="utf-8") as stream:
-                  stream.write("create_tag=false\n")
-                  stream.write(f"publish={'false' if release_exists else 'true'}\n")
-
               if release_exists:
                   print(f"{tag} and its GitHub Release already exist; nothing to publish.")
-              else:
-                  print(f"{tag} exists on the validated commit; recovering missing GitHub Release.")
+                  with output.open("a", encoding="utf-8") as stream:
+                      stream.write("create_tag=false\n")
+                      stream.write("publish=false\n")
+                  raise SystemExit(0)
+
+              tagged_project = tomllib.loads(
+                  subprocess.run(
+                      ["git", "show", f"{tag}:pyproject.toml"],
+                      check=True,
+                      capture_output=True,
+                      text=True,
+                  ).stdout
+              )
+              tagged_version = tagged_project["project"]["version"]
+              if tagged_version != version:
+                  raise SystemExit(
+                      f"cannot recover release for {tag}: tagged project version "
+                      f"is {tagged_version!r}, current version is {version!r}"
+                  )
+
+              tagged_lock = tomllib.loads(
+                  subprocess.run(
+                      ["git", "show", f"{tag}:uv.lock"],
+                      check=True,
+                      capture_output=True,
+                      text=True,
+                  ).stdout
+              )
+              tagged_locked_versions = [
+                  package.get("version")
+                  for package in tagged_lock.get("package", [])
+                  if package.get("name") == "superenalotto-analysis"
+              ]
+              if tagged_locked_versions != [version]:
+                  raise SystemExit(
+                      f"cannot recover release for {tag}: tagged uv.lock metadata "
+                      f"does not match version {version}"
+                  )
+
+              print(f"{tag} exists with valid metadata; recovering its missing GitHub Release.")
+              with output.open("a", encoding="utf-8") as stream:
+                  stream.write("create_tag=false\n")
+                  stream.write("publish=true\n")
               raise SystemExit(0)
 
           semver_tags: list[tuple[int, int, int]] = []
