@@ -1,0 +1,226 @@
+name: Publish Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish release
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out validated commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Verify validated commit is still main HEAD
+        id: head
+        shell: bash
+        run: |
+          set -euo pipefail
+          main_sha="$(git ls-remote origin refs/heads/main | cut -f1)"
+
+          if [[ "$main_sha" != "$RELEASE_SHA" ]]; then
+            echo "A newer commit is already on main; this CI result is stale for publishing."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release metadata
+        if: steps.head.outputs.publish == 'true'
+        id: release
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+
+          python - <<'PY'
+          import os
+          import re
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          pattern = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = project["project"]["version"]
+          match = pattern.fullmatch(version)
+          if match is None:
+              raise SystemExit(f"project version is not stable SemVer: {version!r}")
+
+          lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
+          locked_versions = [
+              package.get("version")
+              for package in lock.get("package", [])
+              if package.get("name") == "superenalotto-analysis"
+          ]
+          if locked_versions != [version]:
+              raise SystemExit(
+                  "uv.lock project version does not match pyproject.toml: "
+                  f"project={version!r}, lock={locked_versions!r}"
+              )
+
+          tag = f"v{version}"
+          existing_tags = subprocess.run(
+              ["git", "tag", "--list"],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout.splitlines()
+
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as stream:
+              stream.write(f"version={version}\n")
+              stream.write(f"tag={tag}\n")
+
+          if tag in existing_tags:
+              tagged_sha = subprocess.run(
+                  ["git", "rev-list", "-n", "1", tag],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout.strip()
+              if tagged_sha != os.environ["RELEASE_SHA"]:
+                  raise SystemExit(
+                      f"{tag} already exists but points to {tagged_sha}, "
+                      f"not validated commit {os.environ['RELEASE_SHA']}"
+                  )
+
+              release_exists = subprocess.run(
+                  [
+                      "gh",
+                      "release",
+                      "view",
+                      tag,
+                      "--repo",
+                      os.environ["GITHUB_REPOSITORY"],
+                  ],
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  check=False,
+              ).returncode == 0
+
+              with output.open("a", encoding="utf-8") as stream:
+                  stream.write("create_tag=false\n")
+                  stream.write(f"publish={'false' if release_exists else 'true'}\n")
+
+              if release_exists:
+                  print(f"{tag} and its GitHub Release already exist; nothing to publish.")
+              else:
+                  print(f"{tag} exists on the validated commit; recovering missing GitHub Release.")
+              raise SystemExit(0)
+
+          semver_tags: list[tuple[int, int, int]] = []
+          for candidate in existing_tags:
+              candidate_match = re.fullmatch(
+                  r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
+                  candidate,
+              )
+              if candidate_match is not None:
+                  semver_tags.append(tuple(map(int, candidate_match.groups())))
+
+          current = tuple(map(int, match.groups()))
+          if semver_tags and current <= max(semver_tags):
+              raise SystemExit(
+                  f"refusing to publish v{version}: it is not newer than the latest SemVer tag"
+              )
+
+          with output.open("a", encoding="utf-8") as stream:
+              stream.write("create_tag=true\n")
+              stream.write("publish=true\n")
+          PY
+
+      - name: Create annotated tag
+        if: >-
+          steps.head.outputs.publish == 'true' &&
+          steps.release.outputs.publish == 'true' &&
+          steps.release.outputs.create_tag == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.release.outputs.tag }}" "$RELEASE_SHA" \
+            -m "SuperEnalotto Analysis ${{ steps.release.outputs.tag }}"
+          git push origin "refs/tags/${{ steps.release.outputs.tag }}"
+
+      - name: Publish GitHub Release
+        if: >-
+          steps.head.outputs.publish == 'true' &&
+          steps.release.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.release.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "SuperEnalotto Analysis ${{ steps.release.outputs.tag }}" \
+            --generate-notes \
+            --latest
+
+      - name: Delete merged release branch
+        if: >-
+          steps.head.outputs.publish == 'true' &&
+          steps.release.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          branch="release/${{ steps.release.outputs.tag }}"
+
+          if ! git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
+            echo "${branch} is already absent; nothing to clean up."
+            exit 0
+          fi
+
+          merged_sha="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$branch" \
+            --state merged \
+            --limit 1 \
+            --json mergeCommit \
+            --jq '.[0].mergeCommit.oid // empty')"
+
+          if [[ "$merged_sha" != "$RELEASE_SHA" ]]; then
+            echo "Leaving ${branch} in place: no merged release PR maps it to ${RELEASE_SHA}."
+            exit 0
+          fi
+
+          git push origin --delete "$branch"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Release publisher"
+            echo
+            if [[ "${{ steps.head.outputs.publish }}" != "true" ]]; then
+              echo "Skipped: the successful CI commit is no longer HEAD of main."
+            elif [[ "${{ steps.release.outputs.publish }}" != "true" ]]; then
+              echo "Skipped: \`${{ steps.release.outputs.tag }}\` and its GitHub Release already exist."
+            elif [[ "${{ steps.release.outputs.create_tag }}" == "false" ]]; then
+              echo "Recovered the missing GitHub Release for existing tag \`${{ steps.release.outputs.tag }}\`."
+            else
+              echo "Published \`${{ steps.release.outputs.tag }}\` from \`${RELEASE_SHA}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

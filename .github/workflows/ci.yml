@@ -1,10 +1,9 @@
 name: CI
 
-# Pushes to main plus pull requests targeting main. That pairing is also what
-# keeps runs from doubling up: a branch in this repo fires only pull_request
-# (its pushes are not to main), and the merge commit fires only push.
-# pull_request (not pull_request_target) means fork PRs run with a read-only
-# token and no access to secrets.
+# Pushes to main plus pull requests targeting main. Release preparation also
+# dispatches this workflow explicitly on its generated branch because GitHub
+# intentionally suppresses pull_request workflows for PRs created with the
+# repository GITHUB_TOKEN.
 on:
   push:
     branches:
@@ -12,6 +11,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 # This workflow only reads the repository. Stating it explicitly also overrides
 # a repository default that may be read-write.
@@ -19,8 +19,8 @@ permissions:
   contents: read
 
 # Supersede the previous run of a pull request when it is updated. Pushes to
-# main group by commit SHA instead, so each commit keeps its own status and no
-# run is ever cancelled or left queued behind another.
+# main and explicit release validations group by commit SHA, so each commit
+# keeps its own status and no run is left queued behind another.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
