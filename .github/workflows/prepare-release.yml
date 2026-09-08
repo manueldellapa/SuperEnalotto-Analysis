@@ -1,0 +1,197 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (SemVer, for example 0.2.1 or 0.3.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: prepare-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      TARGET_VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          activate-environment: true
+
+      - name: Validate release target
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          target = os.environ["TARGET_VERSION"]
+          pattern = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+
+          target_match = pattern.fullmatch(target)
+          if target_match is None:
+              raise SystemExit(
+                  "version must be a stable SemVer value in MAJOR.MINOR.PATCH form"
+              )
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          current = project["project"]["version"]
+          current_match = pattern.fullmatch(current)
+          if current_match is None:
+              raise SystemExit(f"current project version is not supported SemVer: {current!r}")
+
+          target_tuple = tuple(map(int, target_match.groups()))
+          current_tuple = tuple(map(int, current_match.groups()))
+          if target_tuple <= current_tuple:
+              raise SystemExit(
+                  f"target version {target} must be greater than current version {current}"
+              )
+          PY
+
+          branch="release/v${TARGET_VERSION}"
+          tag="v${TARGET_VERSION}"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/${branch}" >/dev/null 2>&1; then
+            echo "Branch ${branch} already exists; refusing to overwrite it."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists; refusing to reuse a released version."
+            exit 1
+          fi
+
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump project version
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          target = os.environ["TARGET_VERSION"]
+          path = Path("pyproject.toml")
+          text = path.read_text(encoding="utf-8")
+          updated, count = re.subn(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{target}"',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("expected exactly one project version in pyproject.toml")
+          path.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Refresh lockfile
+        run: uv lock
+
+      - name: Install locked development environment
+        run: uv sync --locked --all-extras
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Type-check
+        run: python -m mypy src scripts tests
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Verify release diff
+        run: |
+          set -euo pipefail
+          git diff --check
+
+          changed="$(git diff --name-only | sort)"
+          expected=$'pyproject.toml\nuv.lock'
+          if [[ "$changed" != "$expected" ]]; then
+            echo "Unexpected release preparation diff:"
+            printf '%s\n' "$changed"
+            exit 1
+          fi
+
+      - name: Create release branch and commit
+        run: |
+          set -euo pipefail
+          git switch -c "${{ steps.release.outputs.branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock
+          git commit -m "chore(release): prepare ${{ steps.release.outputs.tag }}"
+          git push --set-upstream origin "${{ steps.release.outputs.branch }}"
+
+      - name: Open release pull request
+        id: pr
+        run: |
+          set -euo pipefail
+
+          body="$(cat <<EOF
+          ## Release ${{ steps.release.outputs.tag }}
+
+          Automated release preparation.
+
+          - Bumps the project version to \`${TARGET_VERSION}\`.
+          - Regenerates \`uv.lock\`.
+          - Passed Ruff, mypy strict, and pytest before the branch was pushed.
+          - A separate CI run is dispatched on the release branch below.
+
+          After this PR is merged and the normal CI on \`main\` succeeds, the release publisher will create the annotated tag and GitHub Release automatically.
+          EOF
+          )"
+
+          pr_url="$(gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "${{ steps.release.outputs.branch }}" \
+            --title "chore(release): prepare ${{ steps.release.outputs.tag }}" \
+            --body "$body")"
+
+          echo "url=${pr_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch CI for release branch
+        run: |
+          set -euo pipefail
+          gh workflow run ci.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "${{ steps.release.outputs.branch }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Release preparation created"
+            echo
+            echo "- Version: \`${TARGET_VERSION}\`"
+            echo "- Branch: \`${{ steps.release.outputs.branch }}\`"
+            echo "- Pull request: ${{ steps.pr.outputs.url }}"
+            echo "- CI: explicitly dispatched for the release branch"
+          } >> "$GITHUB_STEP_SUMMARY"
