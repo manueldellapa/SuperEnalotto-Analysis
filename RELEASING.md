@@ -36,23 +36,26 @@ After the release PR is merged, the normal `CI` workflow runs on `main`.
 `Publish Release` reacts only to a successful `CI` run produced by a push to
 `main`.
 
-Before publishing, it verifies that:
+Before publishing a new version, it verifies that:
 
 - the CI-validated commit is still the current `main` HEAD;
 - the project version is stable SemVer;
-- the project package version in `uv.lock` matches `pyproject.toml`;
-- a new version is greater than every existing SemVer tag; and
-- an existing tag, if present during recovery, points to the exact validated
-  commit.
+- the project package version in `uv.lock` matches `pyproject.toml`; and
+- the new version is greater than every existing SemVer tag.
 
 For a new version it creates an annotated `vX.Y.Z` tag and a GitHub Release
 with generated release notes. It then removes the merged
 `release/vX.Y.Z` branch.
 
-The publisher is idempotent: ordinary later commits to `main` do not create a
-second release for an already published version. If tag creation succeeded but
-GitHub Release creation failed, a later successful CI run can recover the
-missing GitHub Release as long as the tag still points to the validated commit.
+The publisher is idempotent: ordinary later commits to `main` keep the already
+released project version until the next release PR, so an existing tag plus an
+existing GitHub Release is treated as a clean no-op even though the tag points
+to the earlier release commit rather than the newest `main` commit.
+
+If tag creation succeeded but GitHub Release creation failed, a later successful
+CI run can recover the missing GitHub Release. Before doing so, the publisher
+reads `pyproject.toml` and `uv.lock` from the tagged commit and verifies that
+their project version matches the tag/current release version.
 
 ## Repository setting
 
