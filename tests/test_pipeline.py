@@ -552,6 +552,27 @@ CONFLICTING_ROWS_HTML = """
 """
 
 
+CONFLICTING_DATES_ROWS_HTML = """
+<table>
+    <tr>
+        <td>Concorso Nº 105 del 2 Luglio 2026</td>
+        <td>4 17 19 23 47 59</td>
+        <td>51</td>
+        <td>82</td>
+        <td>Dettagli</td>
+    </tr>
+
+    <tr>
+        <td>Concorso Nº 105 del 3 Luglio 2026</td>
+        <td>4 17 19 23 47 59</td>
+        <td>51</td>
+        <td>82</td>
+        <td>Dettagli</td>
+    </tr>
+</table>
+"""
+
+
 def test_process_month_rejects_conflicting_rows_in_archive_page(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -640,6 +661,56 @@ def test_download_interval_reports_conflicting_rows_as_month_failure(
     assert "conflicting payloads" in error
 
 
+def test_download_interval_raises_on_conflicting_dates_within_one_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One page claiming a contest on two dates aborts the run.
+
+    parse_archive_page() keys its own dedup by (contest_number, date), so it
+    lets both rows through; the year-aware identity check in
+    deduplicate_extractions() is what catches them, and it runs after the
+    per-month loop, so this is a whole-run abort rather than a month failure.
+    """
+    paths = DataPaths.from_root(tmp_path)
+
+    def fake_download_month(
+        year: int,
+        month: int,
+        *,
+        paths: DataPaths,
+        session: requests.Session,
+        force: bool = False,
+    ) -> Path:
+        path = tmp_path / "2026-07.html"
+        path.write_text(
+            CONFLICTING_DATES_ROWS_HTML,
+            encoding="utf-8",
+        )
+
+        return path
+
+    monkeypatch.setattr(
+        pipeline,
+        "download_month",
+        fake_download_month,
+    )
+
+    with pytest.raises(
+        pipeline.ExtractionConflictError,
+        match="conflicting dates",
+    ) as exc_info:
+        pipeline.download_interval(
+            2026,
+            7,
+            2026,
+            7,
+            paths=paths,
+        )
+
+    assert "Contest 105 in 2026" in str(exc_info.value)
+
+
 def test_deduplicate_extractions() -> None:
     first = make_extraction(
         105,
@@ -665,9 +736,99 @@ def test_deduplicate_extractions() -> None:
     ]
 
 
-def test_deduplicate_extractions_warns_on_conflicting_dates(
+def test_deduplicate_extractions_keeps_same_contest_number_across_years(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Contest numbering restarts every year, so this is not a conflict."""
+    first = make_extraction(
+        1,
+        date(2025, 1, 2),
+    )
+
+    second = make_extraction(
+        1,
+        date(2026, 1, 2),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = pipeline.deduplicate_extractions(
+            [
+                first,
+                second,
+            ]
+        )
+
+    assert result == [
+        first,
+        second,
+    ]
+
+    assert caplog.text == ""
+
+
+def test_deduplicate_extractions_keeps_same_contest_number_across_adjacent_years(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two dates days apart still belong to different contests across a year end."""
+    first = make_extraction(
+        104,
+        date(2025, 12, 30),
+    )
+
+    second = make_extraction(
+        104,
+        date(2026, 1, 2),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = pipeline.deduplicate_extractions(
+            [
+                second,
+                first,
+            ]
+        )
+
+    assert result == [
+        first,
+        second,
+    ]
+
+    assert caplog.text == ""
+
+
+def test_deduplicate_extractions_keeps_different_payloads_across_years(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same number in two years is two contests, whatever they drew."""
+    first = make_extraction(
+        1,
+        date(2025, 1, 2),
+        numbers=(1, 2, 3, 4, 5, 6),
+    )
+
+    second = make_extraction(
+        1,
+        date(2026, 1, 2),
+        numbers=(7, 8, 9, 10, 11, 12),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = pipeline.deduplicate_extractions(
+            [
+                first,
+                second,
+            ]
+        )
+
+    assert result == [
+        first,
+        second,
+    ]
+
+    assert caplog.text == ""
+
+
+def test_deduplicate_extractions_raises_on_conflicting_dates_within_a_year() -> None:
     first = make_extraction(
         105,
         date(2026, 7, 2),
@@ -678,7 +839,10 @@ def test_deduplicate_extractions_warns_on_conflicting_dates(
         date(2026, 7, 3),
     )
 
-    with caplog.at_level(logging.WARNING):
+    with pytest.raises(
+        pipeline.ExtractionConflictError,
+        match="conflicting dates",
+    ) as exc_info:
         pipeline.deduplicate_extractions(
             [
                 first,
@@ -686,7 +850,36 @@ def test_deduplicate_extractions_warns_on_conflicting_dates(
             ]
         )
 
-    assert "conflicting dates" in caplog.text
+    message = str(exc_info.value)
+
+    assert "Contest 105 in 2026" in message
+    assert "2026-07-02" in message
+    assert "2026-07-03" in message
+
+
+def test_deduplicate_extractions_reports_conflicting_dates_before_payloads() -> None:
+    """A disagreement on the date is reported as such even if the draw differs too."""
+    first = make_extraction(
+        105,
+        date(2026, 7, 2),
+    )
+
+    conflicting = make_extraction(
+        105,
+        date(2026, 7, 3),
+        numbers=(1, 2, 3, 4, 5, 6),
+    )
+
+    with pytest.raises(
+        pipeline.ExtractionConflictError,
+        match="conflicting dates",
+    ):
+        pipeline.deduplicate_extractions(
+            [
+                first,
+                conflicting,
+            ]
+        )
 
 
 def test_deduplicate_extractions_collapses_equal_duplicates() -> None:
@@ -1299,6 +1492,63 @@ def test_download_interval_raises_on_conflicting_payloads(
             2,
             paths=DataPaths.from_root(tmp_path),
         )
+
+
+def test_download_interval_keeps_same_contest_number_across_years(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A multi-year download must not flag the yearly numbering restart."""
+    first_of_2024 = make_extraction(
+        1,
+        date(2024, 1, 2),
+    )
+
+    first_of_2025 = make_extraction(
+        1,
+        date(2025, 1, 2),
+    )
+
+    def fake_process_month(
+        year: int,
+        month: int,
+        *,
+        paths: DataPaths,
+        session: requests.Session,
+        force: bool = False,
+    ) -> list[Extraction]:
+        if (year, month) == (2024, 1):
+            return [first_of_2024]
+
+        if (year, month) == (2025, 1):
+            return [first_of_2025]
+
+        return []
+
+    monkeypatch.setattr(
+        pipeline,
+        "process_month",
+        fake_process_month,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        extractions, failures = pipeline.download_interval(
+            2024,
+            1,
+            2025,
+            1,
+            paths=DataPaths.from_root(tmp_path),
+        )
+
+    assert failures == []
+
+    assert extractions == [
+        first_of_2024,
+        first_of_2025,
+    ]
+
+    assert caplog.text == ""
 
 
 def test_download_interval_continues_after_failed_month(

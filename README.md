@@ -223,10 +223,15 @@ range, the six main numbers must be distinct, the contest number must be
 positive, and the date must be a real calendar date. A row that fails any of
 these checks fails the month rather than being written out.
 
-Rows are unique by `(contest_number, extraction_date)`. Duplicate records
-collapse only when their drawn values are identical — two records claiming the
-same contest and date with *different* results are treated as a data-integrity
-error rather than resolved silently.
+Contest numbering restarts every calendar year, so a contest is identified by
+`(year, contest_number)`, where `year` is the year of `extraction_date`. The
+same contest number in two different years is two different contests, not a
+duplicate.
+
+Rows are therefore unique by `(year, contest_number)`. Duplicate records
+collapse only when they agree completely — two records sharing an identity but
+claiming *different* extraction dates, or the same date with *different*
+results, are treated as a data-integrity error rather than resolved silently.
 
 ### Exit codes
 
