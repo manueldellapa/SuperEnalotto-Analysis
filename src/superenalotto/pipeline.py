@@ -213,47 +213,46 @@ def deduplicate_extractions(
 ) -> list[Extraction]:
     """Remove duplicated extractions and sort chronologically.
 
-    Exact duplicates are collapsed. Records sharing a contest number and an
-    extraction date but carrying different drawn values are a data-integrity
-    error and raise ExtractionConflictError instead of silently overwriting
-    each other.
+    Contest numbering restarts every calendar year, so a contest is identified
+    by (extraction year, contest number) rather than by its number alone: the
+    same number in two different years is two different contests, not a
+    conflict.
+
+    Exact duplicates are collapsed. Records sharing an identity but disagreeing
+    on the extraction date or on the drawn values are a data-integrity error and
+    raise ExtractionConflictError instead of silently overwriting each other.
     """
     unique: dict[
-        tuple[int, date],
+        tuple[int, int],
         Extraction,
     ] = {}
 
-    dates_by_contest: dict[int, date] = {}
-
     for extraction in extractions:
-        previous_date = dates_by_contest.get(extraction.contest_number)
-
-        if previous_date is not None and previous_date != extraction.extraction_date:
-            LOGGER.warning(
-                "Contest %d has conflicting dates: %s and %s",
-                extraction.contest_number,
-                previous_date.isoformat(),
-                extraction.extraction_date.isoformat(),
-            )
-
-        dates_by_contest[extraction.contest_number] = extraction.extraction_date
-
-        key = (
+        identity = (
+            extraction.extraction_date.year,
             extraction.contest_number,
-            extraction.extraction_date,
         )
 
-        previous_extraction = unique.get(key)
+        previous_extraction = unique.get(identity)
 
         if previous_extraction is not None and previous_extraction != extraction:
+            year, contest_number = identity
+
+            if previous_extraction.extraction_date != extraction.extraction_date:
+                raise ExtractionConflictError(
+                    f"Contest {contest_number} in {year} has conflicting dates: "
+                    f"{previous_extraction.extraction_date.isoformat()} and "
+                    f"{extraction.extraction_date.isoformat()}"
+                )
+
             raise ExtractionConflictError(
-                f"Contest {extraction.contest_number} on "
+                f"Contest {contest_number} on "
                 f"{extraction.extraction_date.isoformat()} has conflicting "
                 f"payloads: {previous_extraction.describe_payload()} "
                 f"vs {extraction.describe_payload()}"
             )
 
-        unique[key] = extraction
+        unique[identity] = extraction
 
     return sorted(
         unique.values(),
