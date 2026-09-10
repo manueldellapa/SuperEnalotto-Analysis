@@ -109,12 +109,20 @@ def validate_extraction_date(extraction_date: date) -> None:
 def validate_extraction(extraction: Extraction) -> None:
     """Validate a complete SuperEnalotto extraction.
 
+    Field-level rules are delegated to the single-field validators; this
+    function additionally enforces the cross-field invariants that no
+    individual validator can see. The Jolly is drawn from the numbers left in
+    the urn, so it can never repeat one of the six main numbers. The SuperStar
+    is drawn from a separate urn and may legitimately coincide with a main
+    number, so it is deliberately not subject to the same rule.
+
     Args:
         extraction: Extraction to validate.
 
     Raises:
         TypeError: If one of the fields has an invalid type.
-        ValueError: If one of the fields contains an invalid value.
+        ValueError: If one of the fields contains an invalid value, or the
+            Jolly repeats one of the six main numbers.
     """
     if not isinstance(extraction, Extraction):
         raise TypeError(
@@ -127,3 +135,9 @@ def validate_extraction(extraction: Extraction) -> None:
     validate_numbers(extraction.numbers)
     validate_jolly(extraction.jolly)
     validate_superstar(extraction.superstar)
+
+    if extraction.jolly in extraction.numbers:
+        raise ValueError(
+            f"jolly must differ from the main numbers, got {extraction.jolly} "
+            f"in {list(extraction.numbers)}"
+        )

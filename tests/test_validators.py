@@ -187,3 +187,79 @@ def test_validate_extraction_accepts_valid_extraction() -> None:
 def test_validate_extraction_rejects_invalid_object() -> None:
     with pytest.raises(TypeError):
         validate_extraction(object())  # type: ignore[arg-type]
+
+
+def test_validate_extraction_rejects_jolly_in_main_numbers() -> None:
+    extraction = Extraction(
+        contest_number=105,
+        extraction_date=date(2026, 7, 2),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=47,
+        superstar=82,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="jolly must differ from the main numbers",
+    ):
+        validate_extraction(extraction)
+
+
+@pytest.mark.parametrize(
+    "jolly",
+    [
+        4,
+        23,
+        59,
+    ],
+)
+def test_validate_extraction_rejects_jolly_matching_any_position(
+    jolly: int,
+) -> None:
+    extraction = Extraction(
+        contest_number=105,
+        extraction_date=date(2026, 7, 2),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=jolly,
+        superstar=82,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="jolly must differ from the main numbers",
+    ):
+        validate_extraction(extraction)
+
+
+def test_validate_extraction_allows_superstar_in_main_numbers() -> None:
+    extraction = Extraction(
+        contest_number=105,
+        extraction_date=date(2026, 7, 2),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=51,
+        superstar=47,
+    )
+
+    validate_extraction(extraction)
+
+
+def test_validate_extraction_allows_superstar_matching_jolly() -> None:
+    extraction = Extraction(
+        contest_number=105,
+        extraction_date=date(2026, 7, 2),
+        numbers=(4, 17, 19, 23, 47, 59),
+        jolly=51,
+        superstar=51,
+    )
+
+    validate_extraction(extraction)
+
+
+def test_validate_jolly_stays_field_scoped() -> None:
+    """A Jolly repeating a main number is still a valid field value.
+
+    The Jolly/main-numbers relation is a cross-field invariant owned by
+    validate_extraction(); validate_jolly() must keep validating the isolated
+    value only.
+    """
+    validate_jolly(47)
