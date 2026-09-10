@@ -37,3 +37,11 @@ graphify-out/
 
 # Temporary files
 *.tmp
+
+# Claude generated files
+.claude/
+CLAUDE.md
+
+# Codex generated files
+.codex/
+AGENTS.md
