@@ -219,6 +219,60 @@ def test_parse_archive_page_rejects_invalid_superstar() -> None:
         parse_archive_page(html)
 
 
+def test_parse_archive_page_rejects_jolly_duplicated_in_main_numbers() -> None:
+    """The scraper surfaces the cross-field invariant as a ScrapingError.
+
+    The rule itself lives in validate_extraction(); _parse_table_row() only
+    translates the resulting ValueError, so this pins the propagation path
+    rather than a second copy of the rule.
+    """
+    html = """
+    <table>
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>47</td>
+            <td>82</td>
+            <td>Dettagli</td>
+        </tr>
+    </table>
+    """
+
+    with pytest.raises(
+        ScrapingError,
+        match="jolly must differ from the main numbers",
+    ) as exc_info:
+        parse_archive_page(html)
+
+    assert "Contest 105" in str(exc_info.value)
+
+
+def test_parse_archive_page_accepts_superstar_duplicated_in_main_numbers() -> None:
+    html = """
+    <table>
+        <tr>
+            <td>Concorso Nº 105 del 2 Luglio 2026</td>
+            <td>4 17 19 23 47 59</td>
+            <td>51</td>
+            <td>47</td>
+            <td>Dettagli</td>
+        </tr>
+    </table>
+    """
+
+    extractions = parse_archive_page(html)
+
+    assert extractions == [
+        Extraction(
+            contest_number=105,
+            extraction_date=date(2026, 7, 2),
+            numbers=(4, 17, 19, 23, 47, 59),
+            jolly=51,
+            superstar=47,
+        )
+    ]
+
+
 def test_parse_archive_page_rejects_semantically_invalid_row() -> None:
     html = """
     <table>

@@ -215,13 +215,19 @@ removes that stale partial file.
 | `contest_number` | integer | Contest number, as published (`Concorso N° 105`). Always positive. |
 | `extraction_date` | date | Extraction date in ISO format, `YYYY-MM-DD`. |
 | `number_1` … `number_6` | integer | The six main drawn numbers, 1–90, unique within a row, in the order the archive publishes them. |
-| `jolly` | integer | The Jolly number, 1–90. |
-| `superstar` | integer | The SuperStar number, 1–90. |
+| `jolly` | integer | The Jolly number, 1–90. Always different from the six main numbers. |
+| `superstar` | integer | The SuperStar number, 1–90. May coincide with a main number or with the Jolly. |
 
 Every row is validated before it reaches the CSV: numbers must be integers in
-range, the six main numbers must be distinct, the contest number must be
-positive, and the date must be a real calendar date. A row that fails any of
-these checks fails the month rather than being written out.
+range, the six main numbers must be distinct, the Jolly must differ from all
+six of them, the contest number must be positive, and the date must be a real
+calendar date. A row that fails any of these checks fails the month rather than
+being written out.
+
+The Jolly rule does not extend to the SuperStar. The Jolly is drawn from the
+numbers left in the urn after the main six, so repeating one of them is
+impossible; the SuperStar is drawn from a separate urn, so a SuperStar equal to
+a main number is a legitimate result and is accepted.
 
 Contest numbering restarts every calendar year, so a contest is identified by
 `(year, contest_number)`, where `year` is the year of `extraction_date`. The
