@@ -48,7 +48,7 @@ jobs:
       # tag to fall back on — upstream stopped publishing them after v7, so
       # "simplifying" this to @v9 fails the run with an unresolvable action.
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           # The action's default cache-dependency-glob already covers
           # **/uv.lock and **/pyproject.toml, so the key tracks the lockfile
