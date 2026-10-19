@@ -50,3 +50,18 @@ def make_extraction(
         jolly=jolly,
         superstar=superstar,
     )
+
+
+def analysis_extractions() -> list[Extraction]:
+    """Return the three unique synthetic contests specified by PRD US-002."""
+    return [
+        make_extraction(
+            1, date(2023, 12, 30), numbers=(1, 2, 3, 4, 5, 6), jolly=7, superstar=1
+        ),
+        make_extraction(
+            1, date(2024, 1, 2), numbers=(1, 2, 7, 8, 9, 10), jolly=3, superstar=3
+        ),
+        make_extraction(
+            2, date(2024, 2, 29), numbers=(1, 11, 12, 13, 14, 15), jolly=2, superstar=1
+        ),
+    ]

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 superenalotto-download = "superenalotto.cli:main"
+superenalotto-analyze = "superenalotto.analysis_cli:main"
 
 
 [project.optional-dependencies]

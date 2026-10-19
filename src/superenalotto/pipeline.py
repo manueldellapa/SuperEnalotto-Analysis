@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import re
 from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
@@ -27,6 +28,7 @@ from .scraper import (
     download_archive_page,
     parse_archive_page,
 )
+from .validators import validate_extraction
 
 LOGGER = logging.getLogger(__name__)
 
@@ -261,6 +263,77 @@ def deduplicate_extractions(
             extraction.contest_number,
         ),
     )
+
+
+def load_extractions_csv(*, paths: DataPaths) -> list[Extraction]:
+    """Read the canonical CSV once; return valid, unique, ordered extractions.
+
+    No filters or fallback to partial data are applied. Record errors include
+    the source and CSV line; identity conflicts retain their existing details.
+    This operation never creates directories or writes files.
+    """
+    source = paths.extractions_csv
+    extractions: list[Extraction] = []
+    line = 1
+    physical_line = 0
+    try:
+        with source.open(
+            "r", encoding="utf-8", errors="surrogateescape", newline=""
+        ) as csv_file:
+
+            def utf8_lines() -> Iterable[str]:
+                nonlocal physical_line
+                for text in csv_file:
+                    physical_line += 1
+                    # Defer strict decoding until this physical line is consumed:
+                    # TextIOWrapper may otherwise fail while reading ahead.
+                    yield text.encode("utf-8", errors="surrogateescape").decode("utf-8")
+
+            reader = csv.reader(utf8_lines(), strict=True)
+            if next(reader, None) != list(Extraction.CSV_FIELDNAMES):
+                raise ValueError("Expected the canonical CSV header")
+            while True:
+                line = reader.line_num + 1
+                row = next(reader, None)
+                if row is None:
+                    break
+                if len(row) != len(Extraction.CSV_FIELDNAMES):
+                    raise ValueError("Expected exactly ten fields")
+                for name, value in zip(Extraction.CSV_FIELDNAMES, row, strict=True):
+                    if name == "extraction_date":
+                        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value) is None:
+                            raise ValueError("extraction_date must be YYYY-MM-DD")
+                    elif re.fullmatch(r"[0-9]+", value) is None:
+                        raise ValueError(
+                            f"{name} must contain only ASCII decimal digits"
+                        )
+                extraction = Extraction(
+                    contest_number=int(row[0]),
+                    extraction_date=date.fromisoformat(row[1]),
+                    numbers=(
+                        int(row[2]),
+                        int(row[3]),
+                        int(row[4]),
+                        int(row[5]),
+                        int(row[6]),
+                        int(row[7]),
+                    ),
+                    jolly=int(row[8]),
+                    superstar=int(row[9]),
+                )
+                validate_extraction(extraction)
+                extractions.append(extraction)
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{source}: CSV line {physical_line}: {error}") from error
+    except (ValueError, csv.Error) as error:
+        raise ValueError(f"{source}: CSV line {line}: {error}") from error
+    except OSError as error:
+        raise OSError(f"{source}: {error}") from error
+
+    try:
+        return deduplicate_extractions(extractions)
+    except ExtractionConflictError as error:
+        raise ExtractionConflictError(f"{source}: {error}") from error
 
 
 def save_extractions_csv(

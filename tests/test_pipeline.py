@@ -6,6 +6,7 @@ import csv
 import logging
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -1726,3 +1727,193 @@ def test_remove_partial_extractions_csv_warns_on_failed_removal(
     assert removed is False
     assert partial_csv.exists()
     assert "Could not remove stale partial CSV" in caplog.text
+
+
+def test_load_extractions_csv_round_trip_and_deduplication(tmp_path: Path) -> None:
+    from tests.support import analysis_extractions
+
+    paths = DataPaths.from_root(tmp_path)
+    extractions = analysis_extractions()
+    pipeline.save_extractions_csv(
+        [*reversed(extractions), extractions[0]], output_path=paths.extractions_csv
+    )
+    result = pipeline.load_extractions_csv(paths=paths)
+    assert result == extractions
+    assert type(result[0].contest_number) is int
+    assert type(result[0].extraction_date) is date
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "",
+        "wrong",
+        ",".join(reversed(Extraction.CSV_FIELDNAMES)),
+        ",".join(Extraction.CSV_FIELDNAMES[:-1] + ("jolly",)),
+        "1,2024-01-02,1,2,7,8,9,10,3,3",
+    ],
+)
+def test_load_extractions_csv_rejects_invalid_headers(
+    tmp_path: Path, header: str
+) -> None:
+    paths = DataPaths.from_root(tmp_path)
+    paths.processed_directory.mkdir()
+    paths.extractions_csv.write_text(header, encoding="utf-8")
+    with pytest.raises(ValueError, match="CSV line 1") as error:
+        pipeline.load_extractions_csv(paths=paths)
+    assert str(paths.extractions_csv) in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        (0, "1.5"),
+        (0, "1e1"),
+        (0, "+1"),
+        (0, " 1 "),
+        (0, "١"),
+        (0, ""),
+        (0, "0"),
+        (0, "-1"),
+        (0, "1" * 5000),
+        (1, "2024-02-30"),
+        (1, "20240102"),
+        (1, "2024-1-02"),
+        (1, "2024-01-02T00:00:00"),
+        (1, "２０２４-01-02"),
+        (2, "0"),
+        (2, "91"),
+        (3, "1"),
+        (8, "1"),
+        (9, "91"),
+    ],
+)
+def test_load_extractions_csv_rejects_invalid_records(
+    tmp_path: Path, column: int, value: str
+) -> None:
+    paths = DataPaths.from_root(tmp_path)
+    paths.processed_directory.mkdir()
+    row = ["1", "2024-01-02", "1", "2", "7", "8", "9", "10", "3", "3"]
+    row[column] = value
+    with paths.extractions_csv.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(Extraction.CSV_FIELDNAMES)
+        writer.writerow(row)
+    before = paths.extractions_csv.read_bytes()
+    with pytest.raises(ValueError, match="CSV line 2") as error:
+        pipeline.load_extractions_csv(paths=paths)
+    assert str(paths.extractions_csv) in str(error.value)
+    assert paths.extractions_csv.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "",
+        "1,2024-01-02,1,2,7,8,9,10,3",
+        "1,2024-01-02,1,2,7,8,9,10,3,3,4",
+        '1,2024-01-02,1,2,7,8,9,10,3,"3',
+    ],
+)
+def test_load_extractions_csv_rejects_malformed_rows(tmp_path: Path, row: str) -> None:
+    paths = DataPaths.from_root(tmp_path)
+    paths.processed_directory.mkdir()
+    paths.extractions_csv.write_text(
+        ",".join(Extraction.CSV_FIELDNAMES) + "\n" + row + "\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="CSV line 2"):
+        pipeline.load_extractions_csv(paths=paths)
+
+
+@pytest.mark.parametrize("payload_conflict", [False, True])
+def test_load_extractions_csv_preserves_conflicts(
+    tmp_path: Path, payload_conflict: bool
+) -> None:
+    from dataclasses import replace
+
+    from tests.support import analysis_extractions
+
+    paths = DataPaths.from_root(tmp_path)
+    extractions = analysis_extractions()
+    original = extractions[0]
+    changed = (
+        replace(original, superstar=90)
+        if payload_conflict
+        else replace(original, extraction_date=date(2023, 12, 29))
+    )
+    pipeline.save_extractions_csv(
+        [*extractions, changed], output_path=paths.extractions_csv
+    )
+    with pytest.raises(pipeline.ExtractionConflictError) as error:
+        pipeline.load_extractions_csv(paths=paths)
+    assert str(paths.extractions_csv) in str(error.value)
+    assert "Contest 1" in str(error.value)
+    assert ("payloads" if payload_conflict else "dates") in str(error.value)
+
+
+def test_load_extractions_csv_empty_and_invalid_encoding(tmp_path: Path) -> None:
+    paths = DataPaths.from_root(tmp_path)
+    pipeline.save_extractions_csv([], output_path=paths.extractions_csv)
+    assert pipeline.load_extractions_csv(paths=paths) == []
+    paths.extractions_csv.write_bytes(b"\xff")
+    with pytest.raises(ValueError, match="CSV line") as error:
+        pipeline.load_extractions_csv(paths=paths)
+    assert str(paths.extractions_csv) in str(error.value)
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+@pytest.mark.parametrize(
+    ("valid_records", "invalid_record", "physical_line"),
+    [
+        (0, b"\xff", 2),
+        (3, b"1,2024-01-02,1,2,7,8,9,10,3,\xff", 5),
+        (300, b"1,2024-01-02,1,2,7,8,9,10,3,\xe2\x82", 302),
+        (3, b'1,2024-01-02,1,2,7,8,9,10,3,"3{newline}\xff"', 6),
+    ],
+)
+def test_load_extractions_csv_localizes_invalid_utf8(
+    tmp_path: Path,
+    newline: bytes,
+    valid_records: int,
+    invalid_record: bytes,
+    physical_line: int,
+) -> None:
+    paths = DataPaths.from_root(tmp_path)
+    paths.processed_directory.mkdir()
+    valid_row = b"1,2024-01-02,1,2,7,8,9,10,3,3"
+    content = (
+        ",".join(Extraction.CSV_FIELDNAMES).encode("utf-8")
+        + newline
+        + (valid_row + newline) * valid_records
+        + invalid_record.replace(b"{newline}", newline)
+        + newline
+    )
+    paths.extractions_csv.write_bytes(content)
+    with patch.object(Path, "open", autospec=True, side_effect=Path.open) as opened:
+        with pytest.raises(ValueError) as error:
+            pipeline.load_extractions_csv(paths=paths)
+        assert opened.call_count == 1
+    assert f"{paths.extractions_csv}: CSV line {physical_line}:" in str(error.value)
+    assert "utf-8" in str(error.value)
+    assert paths.extractions_csv.read_bytes() == content
+
+
+def test_load_extractions_csv_missing_root_is_not_created(tmp_path: Path) -> None:
+    paths = DataPaths.from_root(tmp_path / "absent")
+    with pytest.raises(OSError):
+        pipeline.load_extractions_csv(paths=paths)
+    assert not paths.root.exists()
+
+
+def test_load_extractions_csv_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = DataPaths.from_root(tmp_path)
+
+    def deny_open(*args: object, **kwargs: object) -> None:
+        raise PermissionError("read denied")
+
+    monkeypatch.setattr(Path, "open", deny_open)
+    with pytest.raises(OSError, match="read denied") as error:
+        pipeline.load_extractions_csv(paths=paths)
+    assert str(paths.extractions_csv) in str(error.value)

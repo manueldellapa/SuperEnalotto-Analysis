@@ -18,6 +18,7 @@ historical SuperEnalotto extraction data from the official archive.
 - Retry failed HTTP requests with configurable backoff
 - Installable `superenalotto-download` command
 - Configurable data directory
+- Offline descriptive frequencies with `superenalotto-analyze`
 - Unit tests with pytest
 - Static type checking with mypy
 - Linting with Ruff
@@ -251,6 +252,47 @@ remaining months still download, with every failure reported at the end.
 Contradictory records are the exception — they stop the run and no CSV is
 written at all.
 
+## Statistical analysis
+
+Analyze the entire canonical CSV with the installed command:
+
+```bash
+superenalotto-analyze --data-dir ~/superenalotto-data
+superenalotto-analyze --data-dir ~/superenalotto-data --category jolly
+superenalotto-analyze --data-dir ~/superenalotto-data --category superstar
+```
+
+`--category` defaults to `main`, pooling the six positions. Categories are
+counted separately, even when a SuperStar matches a main number or the Jolly.
+`--data-dir` uses the same defaults as the downloader. Analysis is offline and
+read-only: it reads only `processed/extractions.csv`, never falls back to the
+partial CSV, and leaves datasets, directories and cached pages untouched.
+
+The complete CSV is strictly validated and deduplicated before counting.
+Identical duplicates count once; conflicting records stop analysis. The report
+shows the source path, category, unbounded requested dates, source and selected
+date ranges, and `N`, the number of unique contests. All 90 numbers appear in
+numeric order, including zero counts. `presence_percent` is `100 * count / N`,
+displayed with two decimal places. Before rounding, percentages total 600% for
+main numbers and 100% for either other category; the denominator is contests.
+
+A header-only CSV succeeds with `N = 0`, dates and percentages `N/A`, 90 zero
+counts and `No extractions in selected period`. A zero-byte file is invalid.
+Reports always state that historical coverage is not certified: the CSV alone
+cannot establish continuity, completeness or freshness. These statistics are
+descriptive, not predictions of future draws.
+
+Reports go to stdout. Expected reading or integrity errors go to stderr without
+a partial report. Exit codes are `0` for a valid report (including empty data)
+or help, `1` for reading/integrity errors, and `2` for invalid arguments. This
+increment supports the whole dataset only; date filters and rankings are not
+available yet.
+
+Python callers can use `pipeline.load_extractions_csv(paths=...)`, which returns
+validated, unique, chronologically ordered extractions, then the pure
+`analysis.calculate_frequencies(extractions, category="main")`. The latter
+requires already validated and deduplicated input and returns unrounded values.
+
 ## Development
 
 ```bash
@@ -290,6 +332,8 @@ request green.
 │   ├── scraper.py              HTTP client and HTML parsing
 │   ├── paths.py                the data directory layout
 │   ├── pipeline.py             caching, CSV I/O, interval orchestration
+│   ├── analysis.py             pure descriptive frequencies
+│   ├── analysis_cli.py         read-only analysis command and presentation
 │   └── cli.py                  argument parsing and exit codes
 ├── scripts/
 │   └── download_extractions.py compatibility launcher for the CLI
