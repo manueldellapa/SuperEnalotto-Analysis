@@ -10,8 +10,26 @@ campioni temporali con una definizione chiara degli estremi.
 - Dipendenze: [US-002](US-002-frequenze.md); validazione completa di US-001.
 - Impatto: `analysis.py`, `analysis_cli.py`, relativi test e README principale.
 - Issue dedicata: assente; nessuna modifica a intervalli del downloader.
+- Stato di consegna al 5 novembre 2026: **pianificata per M1**;
+  TASK-005 e TASK-006 da implementare. Il prerequisito M0 è consegnato.
 - Definition of Ready: **READY**. Semantica inclusiva, limiti mancanti, date
   esterne e vuoto definiti. Integrazione dopo M0; nessuna decisione bloccante.
+
+## Impatto sulla baseline M0
+
+In [analysis.py](../../../../src/superenalotto/analysis.py),
+`calculate_frequencies` considera l'intera sorgente e `FrequencyReport` contiene
+un'unica coppia di estremi. TASK-005 dovrà distinguere contesto della sorgente
+e della selezione, come già richiesto da FR-005 e dagli AC sotto, preservando
+il lettore completo di US-001 e le precondizioni del calcolo.
+
+Il [parser attuale](../../../../src/superenalotto/analysis_cli.py) non espone
+date. Nell'implementazione futura di TASK-006, aggiornare i casi di
+`test_cli_parser` in [test_analysis_cli.py](../../../../tests/test_analysis_cli.py)
+che oggi ne verificano il rifiuto; mantenere quelli su categorie/flag invalidi
+e quelli su classifiche non ancora disponibili in M1. Non è evidenza di filtri
+implementati. Stato dei requisiti condivisi nella
+[copertura per incremento](../README.md#copertura-dei-requisiti-per-incremento).
 
 ## Criteri di accettazione
 

@@ -10,9 +10,32 @@ concorsi dal CSV canonico senza includere record invalidi o duplicati.
   `deduplicate_extractions`, `DataPaths` già presenti.
 - Impatto: lettura in `pipeline.py`, test in `tests/test_pipeline.py`.
 - Issue dedicata: assente. Contesto: #1, #7, #28 e #29, collegamenti nell'indice.
+- Stato di consegna al 5 novembre 2026: **implementata in M0**;
+  TASK-001 e TASK-002 completati nella baseline `56377a4`.
 - Definition of Ready: **READY**. Formato, errori e regole di identità sono
   verificati; nessuna scelta bloccante. La storia abilita US-002, senza introdurre
   un comando utente incompleto.
+
+## Stato ed evidenze M0
+
+Il lettore `load_extractions_csv` è presente in
+[pipeline.py](../../../../src/superenalotto/pipeline.py); riusa
+`validate_extraction`, `deduplicate_extractions` e `DataPaths.extractions_csv`.
+La DoR descrive la preparazione della specifica; lo stato di consegna deriva
+dall'implementazione e dalle evidenze sotto. I task conservano la descrizione
+originaria del lavoro completato, senza richiederne una nuova implementazione.
+
+| Task | Criteri di riferimento | Evidenze ispezionate |
+| --- | --- | --- |
+| TASK-001 | AC-US-001-01, AC-US-001-02, AC-US-001-05 | In [test_pipeline.py](../../../../tests/test_pipeline.py): `test_load_extractions_csv_round_trip_and_deduplication`, `test_load_extractions_csv_rejects_invalid_headers`, `test_load_extractions_csv_rejects_invalid_records`, `test_load_extractions_csv_rejects_malformed_rows`, `test_load_extractions_csv_empty_and_invalid_encoding`, `test_load_extractions_csv_unreadable`. |
+| TASK-002 | AC-US-001-03, AC-US-001-04, AC-US-001-05 | Nello stesso file: round-trip sulla fixture con identità annuali e SuperStar coincidente, `test_load_extractions_csv_rejects_invalid_records`, `test_load_extractions_csv_preserves_conflicts`, `test_load_extractions_csv_missing_root_is_not_created`; in [test_analysis_cli.py](../../../../tests/test_analysis_cli.py): `test_cli_report_and_read_only`, `test_cli_errors_preserve_data`, `test_cli_missing_root`. |
+
+La regressione `test_load_extractions_csv_localizes_invalid_utf8` verifica anche
+la riga fisica dell'errore, una sola apertura e dati immutati su LF/CRLF/CR,
+inclusi lettura anticipata e campi multilinea. È evidenza della diagnostica
+esistente di FR-001/NFR-004, senza cambiare i criteri sotto.
+La [verifica nell'indice](../README.md#verifica-e-successo-misurabile) distingue
+la CI preesistente dall'ispezione documentale di questa revisione.
 
 ## Criteri di accettazione
 

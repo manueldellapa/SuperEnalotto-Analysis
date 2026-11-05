@@ -8,12 +8,38 @@ nel CSV disponibile e in quale quota delle estrazioni, distinguendo le categorie
 - Requisiti: FR-003, FR-004, FR-005, FR-007, FR-010 (comando base);
   NFR-001…006.
 - Dipendenze: [US-001](US-001-lettura-validata.md).
-- Impatto: nuovi `analysis.py` e `analysis_cli.py` proposti nel package,
+- Impatto M0 realizzato: `analysis.py` e `analysis_cli.py` nel package,
   `pyproject.toml`, test speculari, `test_packaging.py` e README principale.
 - Issue dedicata: assente. #6/#7 sono convenzioni già implementate; #30 resta
   separata, con collegamenti nell'indice.
+- Stato di consegna al 5 novembre 2026: **implementata in M0**;
+  TASK-003 e TASK-004 completati nella baseline `56377a4`.
 - Definition of Ready: **READY**. Denominatore, categorie, vuoto e contratto CLI
-  sono definiti. Inizio dopo US-001; nessuna dipendenza da servizi esterni.
+  sono definiti. Il prerequisito US-001 è consegnato; nessuna dipendenza da
+  servizi esterni.
+
+## Stato ed evidenze M0
+
+Il calcolo è implementato da `calculate_frequencies`, `Frequency` e
+`FrequencyReport` in [analysis.py](../../../../src/superenalotto/analysis.py);
+parsing, composizione e presentazione risiedono in
+[analysis_cli.py](../../../../src/superenalotto/analysis_cli.py).
+I task sotto conservano la descrizione originaria del lavoro completato.
+
+| Task | Criteri di riferimento | Evidenze ispezionate |
+| --- | --- | --- |
+| TASK-003 | AC-US-002-01, AC-US-002-02, AC-US-002-04 | `test_frequencies` e `test_empty_frequencies` in [test_analysis.py](../../../../tests/test_analysis.py); la fixture sotto è ripresa da `analysis_extractions` in [support.py](../../../../tests/support.py). |
+| TASK-004 | AC-US-002-03, AC-US-002-04 | `test_cli_report_and_read_only` e `test_cli_empty` in [test_analysis_cli.py](../../../../tests/test_analysis_cli.py): categorie, metadati, arrotondamento e vuoto. |
+| TASK-004 | AC-US-002-05, AC-US-002-06 | Nello stesso file: `test_cli_parser`, `test_cli_errors_preserve_data`, `test_cli_missing_root`; [test_packaging.py](../../../../tests/test_packaging.py) verifica entrambi i target, callable, firma e launcher. Entry point in [pyproject.toml](../../../../pyproject.toml); protezione del canonico in [test_cli.py](../../../../tests/test_cli.py). |
+| TASK-004 | AC-US-002-07 | `test_cli_default_paths`, `test_cli_two_explicit_roots` e confronto di output a righe riordinate in `test_cli_report_and_read_only`. Uso pubblico descritto nel [README](../../../../README.md#statistical-analysis). |
+
+Limite dell'evidenza per AC-US-002-06: i test citati verificano la dichiarazione
+e il target Python dell'entry point; la revisione non ripete lo smoke di help e
+fixture tramite comando installato e non ne ricava prova dai soli test di
+packaging. La verifica automatizzata wheel/sdist di #30 resta distinta.
+La [CI e i limiti di verifica](../README.md#verifica-e-successo-misurabile)
+sono riportati nell'indice. FR-007 e FR-010 sono consegnati solo nella porzione
+M0 indicata dalla [copertura per incremento](../README.md#copertura-dei-requisiti-per-incremento).
 
 ## Fixture comune di riferimento
 

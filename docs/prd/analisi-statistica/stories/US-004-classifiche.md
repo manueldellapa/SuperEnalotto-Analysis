@@ -11,8 +11,27 @@ con un limite di righe e un ordine prevedibile in caso di parità.
   contratto dei conteggi di US-002 per il task puro.
 - Impatto: `analysis.py`, `analysis_cli.py`, relativi test e README principale.
 - Issue dedicata: assente.
+- Stato di consegna al 5 novembre 2026: **pianificata per M2**;
+  TASK-007 e TASK-008 da implementare. M1 resta il prerequisito di consegna
+  integrata; TASK-003 è già completato per la preparazione del task puro.
 - Definition of Ready: **READY**. Ordine, parità, limite, zeri e vuoto definiti;
   integrazione dopo M1, nessuna decisione bloccante.
+
+## Impatto sulla baseline M0
+
+[analysis.py](../../../../src/superenalotto/analysis.py) produce già frequenze
+con conteggi interi e percentuali non arrotondate in ordine numerico.
+TASK-007 userà questo contratto per l'ordinamento previsto, preservando
+denominatore e contesto esteso da M1. L'ordine numerico disponibile in M0
+non costituisce consegna delle classifiche di FR-008 o del limite di FR-009.
+
+Il [parser attuale](../../../../src/superenalotto/analysis_cli.py) non espone
+ordine/limite. Nell'implementazione futura di TASK-008, aggiornare i casi di
+`test_cli_parser` in [test_analysis_cli.py](../../../../tests/test_analysis_cli.py)
+che oggi rifiutano `--order` e `--top`, preservando i casi di errore pertinenti
+e le regressioni M0/M1. M1 non ancora consegnata non cambia la DoR READY della
+specifica. Stato dei requisiti condivisi nella
+[copertura per incremento](../README.md#copertura-dei-requisiti-per-incremento).
 
 ## Criteri di accettazione
 

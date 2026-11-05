@@ -1,13 +1,19 @@
 # PRD — Analisi statistica delle estrazioni storiche
 
-Stato: proposta pronta per implementazione incrementale. Revisione: 19 ottobre
-2026. Baseline locale: commit `cd4bc39`, package `0.2.0`. Questo PRD descrive
-comportamenti futuri; nessun comando di analisi è attualmente disponibile.
+Stato al 5 novembre 2026: M0 implementata; M1 e M2 pianificate, con specifiche
+READY. Lo stato di consegna è distinto dalla Definition of Ready delle storie.
+Baseline storica della proposta del 19 ottobre 2026: commit `cd4bc39`, package
+`0.2.0`; all'epoca il comando di analisi non era disponibile. Baseline corrente
+verificata nel checkout e su `main` GitHub: commit
+[`56377a4`](https://github.com/manueldellapa/SuperEnalotto-Analysis/commit/56377a4be5f4b2399b891acd519c0c33a540c3ef),
+package ancora `0.2.0`. Questa revisione aggiorna solo la documentazione.
 
 ## Problema, utenti e risultato atteso
 
-Chi usa il downloader dispone di un CSV validato, ma deve scrivere strumenti
-propri per contare le uscite dei numeri, confrontarle e restringere il periodo.
+Alla baseline storica chi usava il downloader disponeva di un CSV validato, ma
+doveva scrivere strumenti propri per contare le uscite dei numeri, confrontarle
+e restringere il periodo. M0 offre ora le frequenze sull'intera sorgente;
+filtri temporali e classifiche restano gli incrementi pianificati M1 e M2.
 La funzionalità serve a utenti del toolkit da terminale e sviluppatori Python
 che vogliono esplorare i dati già scaricati.
 
@@ -20,27 +26,29 @@ essere presentate come previsioni delle estrazioni successive.
 
 L'analisi è partita dal grafo Graphify esistente, poi ha verificato le fonti e
 i test pertinenti. Il grafo orienta la navigazione; i fatti sotto derivano dai
-file attuali. Non esistono PRD, ADR o una struttura `docs/` preesistente nel
-checkout esaminato.
+file della baseline corrente. L'assenza di PRD, ADR e struttura `docs/` rilevata
+alla baseline storica precedeva la creazione di questi cinque documenti.
 
 | Fatto verificato | Fonte canonica o evidenza |
 | --- | --- |
-| Il prodotto acquisisce dati e produce CSV; non offre analisi statistiche | [README](../../../README.md), [package e dipendenze](../../../pyproject.toml) |
+| Il prodotto acquisisce dati, produce CSV e offre frequenze descrittive offline M0; filtri e classifiche non sono disponibili | [README](../../../README.md), [package e dipendenze](../../../pyproject.toml) |
 | `Extraction` è frozen/slotted e definisce le dieci colonne CSV | [models.py](../../../src/superenalotto/models.py) |
 | I validatori controllano valori, unicità della sestina e Jolly; costruire `Extraction` da solo non valida | [validators.py](../../../src/superenalotto/validators.py), [test](../../../tests/test_validators.py) |
 | L'identità è `(extraction_date.year, contest_number)`; duplicati uguali collassano, conflitti interrompono | `deduplicate_extractions` in [pipeline.py](../../../src/superenalotto/pipeline.py), [test](../../../tests/test_pipeline.py) |
 | `DataPaths` deriva i percorsi dalla radice scelta; il default distingue checkout e installazione | [paths.py](../../../src/superenalotto/paths.py), [test](../../../tests/test_paths.py) |
 | Il CSV canonico è una sovrascrittura dell'intervallo scaricato; i fallimenti producono un CSV parziale distinto | README, [cli.py](../../../src/superenalotto/cli.py), [test](../../../tests/test_cli.py) |
-| Manca un lettore CSV che ricostruisca e validi le estrazioni; `count_csv_rows` conta soltanto righe | pipeline.py |
+| `load_extractions_csv` legge e valida il canonico, poi deduplica; `count_csv_rows` mantiene il solo conteggio righe | [pipeline.py](../../../src/superenalotto/pipeline.py), [test](../../../tests/test_pipeline.py) |
+| `calculate_frequencies` è puro; `analysis_cli.main` compone lettura, calcolo e presentazione del report M0 | [analysis.py](../../../src/superenalotto/analysis.py), [analysis_cli.py](../../../src/superenalotto/analysis_cli.py), [test del calcolo](../../../tests/test_analysis.py), [test CLI](../../../tests/test_analysis_cli.py) |
 | Python supportato: 3.14.x; CLI con `argparse`; pytest, monkeypatch e `tmp_path`, senza HTTP reale | pyproject.toml, [supporto test](../../../tests/support.py) |
 | CI esegue Ruff, mypy strict e pytest da dipendenze bloccate | [ci.yml](../../../.github/workflows/ci.yml) |
 
 ### Issue correlate
 
-Ricerca GitHub in sola lettura il 19 ottobre 2026, query
+Ricerca GitHub in sola lettura ripetuta il 5 novembre 2026, query
 `repo:manueldellapa/SuperEnalotto-Analysis is:issue`: 15 issue restituite, nessuna
 dedicata a frequenze, filtri o classifiche. Stati delle issue sotto verificati
-individualmente. Le nuove storie non hanno ancora issue associate; non crearle
+individualmente. Le quattro storie non hanno issue dedicate, anche se M0 è
+implementata; questa è una lacuna di copertura del tracker. Non crearle
 automaticamente.
 
 | Issue | Stato verificato | Relazione con il PRD |
@@ -48,8 +56,8 @@ automaticamente.
 | [#1 — preservare il CSV canonico](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/1) | Chiusa | US-001 e US-002 devono preservarne le garanzie |
 | [#6 — CLI installabile](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/6) | Chiusa | Convenzione riusata da US-002 |
 | [#7 — directory configurabili](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/7) | Chiusa | `DataPaths` riusato da US-001 e US-002 |
-| [#28 — identità per anno e concorso](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/28) | Chiusa | Regola da riusare in US-001, anche oltre il cambio d'anno |
-| [#29 — Jolly distinto dalla sestina](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/29) | Chiusa | Validazione da riusare in US-001; SuperStar può coincidere |
+| [#28 — identità per anno e concorso](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/28) | Chiusa | Regola riusata in US-001, anche oltre il cambio d'anno |
+| [#29 — Jolly distinto dalla sestina](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/29) | Chiusa | Validazione riusata in US-001; SuperStar può coincidere |
 | [#30 — smoke test wheel/sdist](https://github.com/manueldellapa/SuperEnalotto-Analysis/issues/30) | Aperta | Lavoro di distribuzione separato: coordinare il nuovo entry point se svolto; non blocca queste storie |
 
 Le issue storiche possono descrivere versioni precedenti del dominio: in
@@ -71,9 +79,11 @@ Questo PRD non ripropone i fix già presenti né include il completamento di #30
 - Scrivere il report testuale su stdout; messaggi di errore su stderr. Testo
   dell'interfaccia in inglese, coerente con CLI e README esistenti.
 
-Queste sono scelte del PRD, non capacità già presenti né preferenze confermate
-dall'utente. Sono sufficientemente definite per l'implementazione e modificabili
-in una successiva revisione mantenendo gli identificatori.
+Le scelte di M0 sono ora implementate; intervalli e classifiche rimangono
+specifiche READY di M1/M2. La proposta storica non attestava preferenze
+confermate dall'utente: questa revisione ne preserva le decisioni e distingue
+le capacità disponibili da quelle pianificate, senza introdurre nuove scelte
+funzionali. READY non equivale a consegna o approvazione di una release.
 
 Esclusioni: predizioni, suggerimenti di gioco, ritardi, combinazioni/coppie,
 test inferenziali, confronti automatici fra periodi, grafici, web UI, API HTTP,
@@ -113,15 +123,15 @@ requisiti concorrenti.
 
 ## Impatto e riuso dell'architettura
 
-| Componente attuale | Impatto previsto |
+| Componente attuale | Stato M0 e impatto residuo M1/M2 |
 | --- | --- |
-| `pipeline.py` | Aggiungere la lettura CSV validata vicino all'I/O esistente; riusare validazione e deduplicazione, senza rifattorizzare il download. Il lettore restituisce dati prima del calcolo e non applica filtri. |
+| `pipeline.py` | Lettore CSV validato implementato con riuso di validazione e deduplicazione, senza rifattorizzare il download. Restituisce dati prima del calcolo e non applica filtri; preservare questo confine in M1/M2. |
 | `models.py`, `validators.py`, `constants.py` | Riutilizzare `Extraction`, header e regole 1–90; nessuna migrazione o modifica dell'entità. |
 | `paths.py` | Riutilizzare `DataPaths.extractions_csv`, senza percorsi globali o nuove cartelle dati. |
-| Nuovo `analysis.py` proposto | Calcolo puro di frequenze, selezione temporale e ordinamento; nessun disco/rete. Risultati con un semplice contratto tipizzato; evitare gerarchie di servizi e protocolli generici. Le funzioni di calcolo ricevono estrazioni già validate e deduplicate, precondizione da documentare. |
-| Nuovo `analysis_cli.py` proposto | Parsing, risoluzione dei percorsi, composizione lettura/calcolo, formattazione e codici d'uscita. Non ampliare il parser del downloader. |
-| `pyproject.toml`, `tests/test_packaging.py` | Aggiungere entry point. Il test attuale confronta l'intera mappa con un solo comando: aggiornarlo per verificare precisamente entrambi e la chiamabilità, senza cancellare la garanzia precedente. |
-| Test e README | Estendere `test_pipeline.py` e `test_packaging.py`; aggiungere test speculari ai due moduli nuovi. Documentare uso e confini del report nel README durante l'implementazione. |
+| `analysis.py` | Frequenze pure e contratti tipizzati `Frequency`/`FrequencyReport` implementati, senza disco/rete; precondizione di input valido e deduplicato documentata. M1 aggiungerà la selezione distinguendo contesto sorgente/selezione; M2 ordinerà i conteggi interi. Evitare gerarchie di servizi e protocolli generici. |
+| `analysis_cli.py` | Parsing base, percorsi, composizione, formattazione ed exit code implementati. M1/M2 estenderanno solo questo parser con le rispettive opzioni, senza ampliare il downloader. |
+| `pyproject.toml`, `tests/test_packaging.py` | Entry point di analisi registrato; il test verifica già entrambi i comandi, chiamabilità e argomenti Python opzionali. Preservare queste garanzie; smoke wheel/sdist distinto in #30. |
+| Test e README | Test del lettore, calcolo, CLI e packaging e documentazione utente M0 presenti. M1/M2 estenderanno test e README nei rispettivi task; il rifiuto attuale delle opzioni future è intenzionale. |
 
 Non serve database, schema nuovo, servizio esterno o migrazione. Il lettore è
 stretto sul formato oggi scritto dal progetto; l'eventuale supporto a CSV di
@@ -130,17 +140,18 @@ deve alterare CLI, launcher, uscite o protezione del CSV parziale del downloader
 
 ### Interfaccia finale proposta
 
-Esempi futuri, disponibili solo dopo le milestone corrispondenti:
+Il primo esempio è disponibile in M0. Gli esempi M1/M2 descrivono l'interfaccia
+pianificata e non sono ancora eseguibili; la scelta della categoria è già M0.
 
 ```bash
-# M0: frequenze di tutta la sorgente disponibile, numeri principali
+# M0 disponibile: frequenze di tutta la sorgente, numeri principali
 superenalotto-analyze --data-dir ~/superenalotto-data
 
-# M1: periodo inclusivo e categoria separata
+# M1 pianificata: periodo inclusivo e categoria separata
 superenalotto-analyze --data-dir ~/superenalotto-data --category jolly \
   --start-date 2024-01-01 --end-date 2024-12-31
 
-# M2: primi dieci per frequenza nel periodo, oppure meno frequenti
+# M2 pianificata: primi dieci per frequenza nel periodo, oppure meno frequenti
 superenalotto-analyze --start-date 2024-01-01 --order most-frequent --top 10
 superenalotto-analyze --category superstar --order least-frequent --top 10
 ```
@@ -155,6 +166,12 @@ di copertura deve restare presente anche con un CSV canonico e senza parziale.
 M0–M2 sono incrementi locali di questo PRD, senza versione di release assegnata
 e senza creare o rinominare milestone GitHub esistenti.
 
+| Incremento | Stato di consegna al 5 novembre 2026 | Evidenza o prerequisito |
+| --- | --- | --- |
+| M0 | Implementata, TASK-001…004 completati | Commit `56377a4`, evidenze nelle storie US-001/002 e CI indicata sotto |
+| M1 | Pianificata, TASK-005/006 da implementare | Specifica US-003 READY; prerequisito M0 consegnato |
+| M2 | Pianificata, TASK-007/008 da implementare | Specifica US-004 READY; consegna integrata dopo M1, task puro dopo TASK-003 |
+
 | ID | Risultato e criterio di uscita | Dipendenze | Storie e requisiti |
 | --- | --- | --- | --- |
 | M0 | Frequenze utilizzabili da CLI sull'intero CSV: ingresso validato, 90 numeri, categorie separate, percentuali e metadati verificati; gate verdi. US-001 è il prerequisito tecnico minimo incluso nello stesso incremento verticale di US-002. | Nessuna nuova dipendenza esterna | [US-001](stories/US-001-lettura-validata.md), [US-002](stories/US-002-frequenze.md); FR-001…005, FR-007, FR-010 (comando base); NFR-001…006 |
@@ -165,21 +182,37 @@ Ordine delle storie: US-001 → US-002 → US-003 → US-004. I task puri sui fi
 sulle classifiche possono essere preparati indipendentemente dopo il contratto
 di conteggio di TASK-003; integrazione CLI e consegna seguono le milestone.
 
-| Storia | Task atomici | Dipendenza di storia | Definition of Ready | Issue dedicata |
-| --- | --- | --- | --- | --- |
-| US-001 | TASK-001, TASK-002 | Nessuna | READY | Assente |
-| US-002 | TASK-003, TASK-004 | US-001 | READY | Assente |
-| US-003 | TASK-005, TASK-006 | US-002 | READY | Assente |
-| US-004 | TASK-007, TASK-008 | US-003 | READY | Assente |
+| Storia | Task atomici | Dipendenza di storia | Definition of Ready | Stato di consegna | Issue dedicata |
+| --- | --- | --- | --- | --- | --- |
+| US-001 | TASK-001, TASK-002 | Nessuna | READY | Implementata in M0 | Assente |
+| US-002 | TASK-003, TASK-004 | US-001 | READY | Implementata in M0 | Assente |
+| US-003 | TASK-005, TASK-006 | US-002 | READY | Pianificata per M1 | Assente |
+| US-004 | TASK-007, TASK-008 | US-003 | READY | Pianificata per M2 | Assente |
 
 READY significa che non manca una decisione per iniziare la storia quando i
 prerequisiti sono consegnati; non significa che i predecessori siano già
 implementati. I dettagli di criteri AC e verifiche risiedono nelle storie.
 
+### Copertura dei requisiti per incremento
+
+Questa tabella annota lo stato senza ridefinire FR/NFR. Le definizioni canoniche
+e i criteri di uscita sopra restano invariati; nessun requisito trasversale è
+considerato interamente consegnato per il solo completamento di M0.
+
+| Requisiti | M0 implementata | M1 pianificata | M2 pianificata |
+| --- | --- | --- | --- |
+| [FR-001, FR-002](#requisiti-funzionali-canonici) | Lettura, validazione e deduplicazione dell'intera sorgente | Preservare le garanzie anche per record fuori filtro, US-003 | Preservare la stessa sorgente validata |
+| [FR-003, FR-004, FR-005](#requisiti-funzionali-canonici) | Frequenze, percentuali e contesto senza limiti; sorgente e selezione coincidono | Applicare al campione filtrato e distinguere gli estremi, US-003 | Preservare metadati e denominatore prima del taglio, US-004 |
+| [FR-006](#requisiti-funzionali-canonici) | Non disponibile | Filtri di US-003 | Riuso dei filtri |
+| [FR-007](#requisiti-funzionali-canonici) | Vuoto su CSV con sola intestazione, ordine numerico | Vuoto prodotto dai filtri | Vuoto nelle classifiche |
+| [FR-008, FR-009](#requisiti-funzionali-canonici) | Solo ordine numerico predefinito; classifiche, opzione `--order` e limite assenti | Preservare ordine numerico | Classifiche e limite di US-004 |
+| [FR-010](#requisiti-funzionali-canonici) | Entry point, opzioni base ed exit code | Opzioni date e relativi errori | Opzioni ordine/limite e relativi errori |
+| [NFR-001…006](#requisiti-non-funzionali) | Evidenze del lettore/calcolo/CLI e CI M0 | Preservare le garanzie M0; verificare filtri e regressioni previste in US-003 | Preservare M0/M1; verificare classifiche e regressioni previste in US-004 |
+
 ## Verifica e successo misurabile
 
-Il completamento richiede tutti i criteri AC delle quattro storie soddisfatti,
-copertura di ogni FR nella tabella sopra e test su fixture con risultati noti:
+Il completamento dell'intero PRD (M0–M2) richiede tutti i criteri AC delle quattro
+storie soddisfatti, copertura di ogni FR e test su fixture con risultati noti:
 invarianti `6N`/`N`, confini temporali, duplicati/conflitti, parità, assenza di
 dati, errori e conservazione dei file. Nessuna dipendenza da archivio remoto o
 dataset personale per provare correttezza.
@@ -194,12 +227,20 @@ python -m pytest
 ```
 
 Verificare anche lo stile con `python -m ruff format --diff .`, convenzione
-locale aggiuntiva, senza descriverlo come gate CI. Quando si aggiunge il comando,
+locale aggiuntiva, senza descriverlo come gate CI. Per il comando introdotto in M0,
 risincronizzare l'ambiente e verificarne `--help` e una fixture temporanea tramite
 l'entry point installato. La verifica di wheel/sdist resta distinta (#30).
 
-Questo lavoro di pianificazione valida documentazione e tracciabilità; non
-esegue né attesta questi gate di implementazione. Per modifiche future al codice
+Evidenza funzionale preesistente, ricontrollata su GitHub il 5 novembre 2026:
+[CI 39330380209](https://github.com/manueldellapa/SuperEnalotto-Analysis/actions/runs/39330380209)
+su `56377a4`, evento push su `main` del 19 ottobre, conclusa con successo;
+installazione bloccata, Ruff, mypy e pytest risultano tutti riusciti.
+I collegamenti a codice/test nelle storie rendono ispezionabile la copertura,
+senza sostituire l'esecuzione dei test. Il completamento M0 non attesta M1/M2.
+
+Questa revisione valida documentazione e tracciabilità; non riesegue suite,
+installazioni, smoke del comando installato o build e non produce una nuova
+attestazione funzionale. Per modifiche future al codice
 seguire anche l'aggiornamento Graphify richiesto dalle istruzioni del repository.
 
 ## Rischi e questioni aperte
@@ -207,10 +248,10 @@ seguire anche l'aggiornamento Graphify richiesto dalle istruzioni del repository
 | Rischio fondato | Impatto | Mitigazione e responsabilità |
 | --- | --- | --- |
 | Un download pulito ma ristretto sovrascrive il CSV; mancano attestazioni di copertura | Statistiche corrette sul campione possono sembrare storia completa | FR-005: mostrare date/N e copertura non certificata. US-002; nessuna nuova gestione della provenienza. |
-| Una `Extraction` costruita dal CSV non si valida automaticamente | Conteggi ottenuti da input corrotto | Validazione esplicita dell'intero file e deduplicazione prima dei filtri, US-001. |
+| Una `Extraction` costruita dal CSV non si valida automaticamente | Conteggi ottenuti da input corrotto | Mitigazione M0 implementata: validazione esplicita dell'intero file e deduplicazione, US-001; preservarla prima dei filtri M1. |
 | Identità annuale e SuperStar sovrapponibile sono dettagli già protetti dai test | Doppio conteggio o rigetto di record legittimi | Riusare regole e fixture, US-001/002; regressioni #28/#29. |
-| Percentuali della sestina sommano a 600%, non a 100% | Interpretazione errata della metrica | Nome `presence_percent`, denominatore N e descrizione nel report/README, US-002. |
-| Il test packaging attuale ammette un solo comando; #30 è ancora aperta | Fallimento prevedibile del test o affidabilità dell'artefatto non provata | Aggiornamento mirato in TASK-004; distinguere test del checkout da smoke dell'artefatto. |
+| Percentuali della sestina sommano a 600%, non a 100% | Interpretazione errata della metrica | Mitigazione M0 presente: `presence_percent`, denominatore N e descrizione nel report/README, US-002; preservare in M1/M2. |
+| #30 è ancora aperta; il precedente limite del test packaging a un solo comando è risolto in M0 | La verifica degli entry point nel checkout non prova l'artefatto distribuito | TASK-004 completato per i due comandi; mantenere distinta la verifica automatizzata wheel/sdist, fuori da queste storie. |
 
 Non risultano decisioni funzionali bloccanti con il perimetro proposto. Restano
 da pianificare fuori da queste storie la versione di rilascio e l'eventuale
@@ -219,10 +260,21 @@ metriche richiedono requisiti separati se richiesti in futuro.
 
 ## Validazione di questa revisione
 
-Controllati i cinque documenti: 10 FR e 6 NFR canonici, 4 storie con stato e
-dipendenze espliciti, 22 criteri AC univoci e 8 task con parent e dipendenze
-acicliche. Verificati i link locali e gli anchor, la copertura dei requisiti
-nelle storie, l'ordine delle milestone e gli esiti numerici della fixture.
-Rivisti i riferimenti alle fonti e alle issue sopra; nessuna incoerenza bloccante
-rilevata. Queste verifiche riguardano il PRD, non l'esecuzione della funzionalità
-futura o il superamento della suite del progetto.
+Revisione documentale del 5 novembre 2026, secondo le skill `prd` e `graphify`:
+controllati i cinque documenti, conservando 10 FR e 6 NFR canonici, 4 storie,
+22 criteri AC e 8 task. Confrontati con la baseline i testi normativi,
+identificativi, parent, dipendenze, fixture, collegamenti e heading esistenti.
+Verificati unicità, riferimenti, copertura per incremento, dipendenze acicliche,
+link locali e anchor, esiti numerici della fixture e coerenza con codice,
+test, README e stati GitHub indicati sopra.
+
+La struttura rimane composta dall'indice e dalle quattro storie: le milestone
+restano qui per evitare duplicazioni. Graphify è stato usato per la navigazione;
+filenames, heading preesistenti e collegamenti relativi restano stabili.
+Il grafo generato non è rigenerato da questa revisione limitata ai PRD: le sue
+posizioni di riga possono precederla e vanno confermate sui file attuali.
+La documentazione resta leggibile senza Graphify.
+
+Nessuna incoerenza documentale bloccante rilevata. Restano espliciti l'assenza
+di issue dedicate e i limiti delle evidenze funzionali descritti sopra e in
+US-002; non sono stati modificati codice, test, configurazioni o oggetti GitHub.
